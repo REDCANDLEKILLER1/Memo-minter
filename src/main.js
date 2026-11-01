@@ -270,8 +270,11 @@ async function importWallet(){
     if(typeof seed!=="string" || !/^s[1-9A-HJ-NP-Za-km-z]{15,60}$/.test(seed))
       throw new Error("Wallet JSON must contain an XRPL family seed (s...).");
     assertTestNetwork(currentNetwork());
-    if(data?.network && data.network!==currentNetwork())
-      throw new Error("Wallet backup is for "+data.network+"; change network before restoring");
+    // Never encourage importing a production wallet seed into this unaudited
+    // preview: accept only explicitly tagged XRPMan disposable test backups.
+    if(data?.format!=="XRPMan-Disposable-Test-Wallet" || data.version!==1 ||
+       data.network!==currentNetwork())
+      throw new Error("This preview only restores XRPMan disposable Testnet/Devnet wallet backups. Do not import a Mainnet wallet.");
     const restored=xrpl.Wallet.fromSeed(seed);
     if(data?.address && data.address!==restored.address)
       throw new Error("Wallet backup address does not match seed");
