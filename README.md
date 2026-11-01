@@ -4,10 +4,19 @@
 
 Experimental browser app for writing actual binary data to XRPL transaction memos, retrieving chunks from **validated ledger transaction hashes**, and minting an archive NFT. Supports pictures, songs, video, PDFs and arbitrary bytes (up to 5 MiB in this version). Every byte of the original file is reconstructed and verified against SHA-256.
 
+## One-click Testnet wallet onboarding (v0.2.1)
+1. Click **Connect Test Wallet**. There is no external website or manual seed entry.
+2. The browser generates a disposable wallet locally with \`xrpl.Wallet.generate()\` and requests a wallet-backup JSON download. Confirm the JSON was actually saved; the browser cannot attest that Downloads completed.
+3. The app connects to the selected Testnet/Devnet WebSocket and calls \`client.fundWallet(wallet)\`. xrpl.js uses the appropriate public test-network faucet; **only the public account address is needed**. This is still an external faucet service, hosted by the XRPL ecosystem; an app cannot mint test XRP on its own.
+4. The UI displays **Connected & funded** only after a positive \`account_info\` balance is independently read from a **validated** ledger. Faucet errors and outages stay in an unfunded state. A retry reuses the same account, never silently creates another.
+5. An existing local test wallet can optionally be restored from the downloaded JSON via the advanced restore section, or used to resume a saved archive checkpoint.
+
+The site never stores the seed in localStorage or on Vercel. The JSON download contains the test seed in plaintext: keep it private and **never reuse it on Mainnet**. Closing the browser requires loading the saved backup to sign on the same account again. A Testnet reset can remove its balance and history. Funding availability and CORS must be tested from a real mobile browser; no successful live faucet call is claimed by the unit tests.
+
 ## Threat model and secret handling
 - Testnet/Devnet **only**. No Mainnet URI, network option, or Mainnet submission path.
 - Use a **new, disposable, funded non-mainnet wallet**; never import a mainnet account seed, even though the client can't submit to Mainnet.
-- The user selects a local wallet JSON file containing \`seed\`, \`familySeed\`, or \`wallet.seed\`, all in XRPL family seed format. Mnemonics are unsupported.
+- A one-tap generated test wallet is the default. Optional recovery selects a local wallet JSON file containing \`seed\`, \`familySeed\`, or \`wallet.seed\`, all in XRPL family seed format. Mnemonics are unsupported.
 - Seed is read by the local browser script; it is never posted to the server, put in localStorage or echoed into logs or download receipts.
 - Signing uses pinned xrpl.js bundled into same-origin JavaScript at build time. Content Security Policy only allows this origin's JavaScript and configured non-mainnet websocket hosts.
 - Any malicious extension, injected script, or compromised browser could still steal a seed. **No independent security audit yet.** Prefer wallet-approved signing for future production versions.
