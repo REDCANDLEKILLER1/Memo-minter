@@ -4,6 +4,14 @@
 
 Experimental browser app for writing actual binary data to XRPL transaction memos, retrieving chunks from **validated ledger transaction hashes**, and minting an archive NFT. Supports pictures, songs, video, PDFs and arbitrary bytes (up to 5 MiB in this version). Every byte of the original file is reconstructed and verified against SHA-256.
 
+## Ladybug diagnostics + local file preparation (v0.2.2)
+- A small **🐞** toggle is fixed at the lower-right of the screen. It opens a scrollable local diagnostic panel with timestamped browser errors, unhandled promise rejections, button operations, network/funding stages, file selected (only media kind + size), actual file-read percentage, SHA-256 hashing, upload checkpoints, signed/validated transaction **hashes**, receipt retrieval and failure outcomes.
+- Debug panel offers **Download Log**, **Copy Log**, and **Clear**. Logs are bounded to the most recent 350 events and persisted in localStorage across refreshes, with redaction for seeds, mnemonics, private keys, signed blobs, MemoData and long hex. No diagnostic data is uploaded or sent to a telemetry endpoint.
+- The **Prepare file** button now shows immediate activity, a spinner, per-byte progress from 256 KiB local binary reads, a distinct hashing phase, and a clear success banner ("no transactions sent yet") or a clear error banner. The original ledger-progress bar remains separate and is labeled accordingly.
+- The selected file name may be shown in the browser UI, but is **not** sent to the diagnostic log. The file's binary data stays local until the user explicitly authorizes ledger writes.
+- Regression tests cover byte-identical image reads, monotonic progress, invalid input, bounded persistence and secret redaction. All **16/16 unit tests** and the Vite build passed on GitHub Actions run 41264964794 (head \`5aba587\`).
+- **Not yet verified:** live mobile file-picker interaction and XRPL signing/Batch/NFT behavior. The PR remains a draft; existing main/production are unchanged.
+
 ## One-click Testnet wallet onboarding (v0.2.1)
 1. Click **Connect Test Wallet**. There is no external website or manual seed entry.
 2. The browser generates a disposable wallet locally with \`xrpl.Wallet.generate()\` and requests a wallet-backup JSON download. Confirm the JSON was actually saved; the browser cannot attest that Downloads completed.
