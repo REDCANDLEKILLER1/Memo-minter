@@ -1157,8 +1157,7 @@ async function refreshStatusReadOnly(force=false){
     await refreshBalance();
     trace("status.refresh.success",{network:currentNetwork(),walletFunded});
   }catch(error){trace("status.refresh.error",{message:safeText(error)},"warn")}
-  finally{renderLiveUploadStatus();}
-  finally{periodicRefreshBusy=false}
+  finally{periodicRefreshBusy=false;renderLiveUploadStatus()}
 }
 window.setInterval(()=>{
   renderLiveUploadStatus(); // local UI only; does not need wallet signing or network requests
