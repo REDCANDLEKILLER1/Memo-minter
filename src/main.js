@@ -1082,6 +1082,7 @@ if(dropArea){
 on("connect",connectTestWallet);on("importWallet",importWallet);on("forgetWallet",()=>forgetWallet());
 on("backupWallet",()=>walletBackup());
 on("prepare",prepareFile);on("autoMint",startAutoMint);on("refreshGallery",()=>refreshGallery());
+on("statusRefreshNow",()=>refreshStatusReadOnly(true));
 $("pauseAuto").addEventListener("click",()=>{
   pauseUploadRequested=true;
   window.dispatchEvent(new Event("xrpman-upload-wake"));
@@ -1144,17 +1145,19 @@ window.addEventListener("online",()=>{
 });
 window.addEventListener("offline",()=>renderLiveUploadStatus());
 let periodicRefreshBusy=false;
-async function refreshStatusReadOnly(){
+async function refreshStatusReadOnly(force=false){
   renderLiveUploadStatus();
+  trace("status.refresh.request",{manual:force,uploadActive:autoUploadRunning});
   if(document.visibilityState!=="visible" || !navigator.onLine || periodicRefreshBusy)return;
   if(autoUploadRunning || busy || !wallet || !client?.isConnected())return;
-  if(Date.now()-lastBalanceRefresh<30000)return;
+  if(!force && Date.now()-lastBalanceRefresh<30000)return;
   lastBalanceRefresh=Date.now();
   periodicRefreshBusy=true;
   try{
     await refreshBalance();
     trace("status.refresh.success",{network:currentNetwork(),walletFunded});
   }catch(error){trace("status.refresh.error",{message:safeText(error)},"warn")}
+  finally{renderLiveUploadStatus();}
   finally{periodicRefreshBusy=false}
 }
 window.setInterval(()=>{
