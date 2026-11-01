@@ -4,6 +4,7 @@ import {
   toHex, digestHex, manifestFor, encodeChunk, decodeChunk,
   validateReceipt, reassemble
 } from "./protocol.js";
+import { assertTestNetwork, fundAndVerifyTestWallet, readValidatedDrops } from "./test-wallet.js";
 
 const $ = id => document.getElementById(id);
 const SERVERS = Object.freeze({
@@ -20,21 +21,25 @@ const txLog = text => { $("txLog").textContent = new Date().toLocaleTimeString()
 const checked = () => { if (!$("consent").checked) throw new Error("Confirm the Testnet/Devnet ledger-write disclosure first"); };
 const safeText = err => err instanceof Error ? err.message : String(err);
 let client = null, wallet = null, rawBytes = null, receipt = null;
-let readerReceipt = null, busy = false, previewUrl = null;
+let readerReceipt = null, busy = false, previewUrl = null, walletFunded = false;
 
 function currentNetwork() { return $("network").value; }
 function syncControls() {
   const hasReceipt = !!receipt;
-  const canWrite = !!client?.isConnected() && !!wallet && !!rawBytes &&
+  const canWrite = !!client?.isConnected() && !!wallet && walletFunded && !!rawBytes &&
     hasReceipt && receipt.wallet===wallet.address && receipt.manifest.network===currentNetwork() &&
-    !$("consent").checked===false && !receipt.pending && !busy;
+    $("consent").checked && !receipt.pending && !busy;
   $("submit").disabled = !canWrite || receipt.confirmed.length>=receipt.manifest.totalChunks;
   $("mint").disabled = !canWrite || receipt.confirmed.length!==receipt.manifest.totalChunks || !!receipt.nftHash;
   $("resolve").disabled = !client?.isConnected() || !receipt?.pending || busy;
   $("export").disabled = !receipt;
   $("prepare").disabled = busy;
   $("connect").disabled = busy;
+  $("connect").textContent = busy ? "Connecting & funding…" : walletFunded ? "Test Wallet Connected" : wallet ? "Retry Test Wallet" : "Connect Test Wallet";
+  $("backupWallet").disabled = !wallet || busy;
+  $("network").disabled = busy;
   $("importWallet").disabled = busy;
+  $("forgetWallet").disabled = busy;
   $("readLedger").disabled = busy;
 }
 function setBusy(value) { busy = value; syncControls(); }
@@ -76,62 +81,147 @@ function assertSigner(){
   if (receipt.pending)throw new Error("Previous signed transaction unresolved. Use Resolve Pending first.");
   checked();
 }
-async function connectNetwork(){
+async function connectNetwork() {
+  const selected = currentNetwork();
+  assertTestNetwork(selected); // rejects mainnet, even if UI is manipulated
+  if (client?.isConnected()) return;
+  if (client) { try { await client.disconnect(); } catch {} }
+  client = new xrpl.Client(SERVERS[selected], {connectionTimeout:10000, timeout:15000});
+  try {
+    await client.connect();
+    const response = await client.request({command:"server_info"});
+    const infoObj=response?.result?.info || {};
+    $("networkLabel").textContent=selected.toUpperCase();
+    $("netStatus").textContent="Connected to "+selected.toUpperCase()+" node";
+    txLog("Network connected: "+selected+" · "+(infoObj.build_version||"version unknown"));
+  } catch (error) {
+    try { await client.disconnect(); } catch {}
+    client=null;
+    throw error;
+  }
+}
+function walletBackup() {
+  if (!wallet) throw new Error("No test wallet connected");
+  assertTestNetwork(currentNetwork());
+  if (!wallet.seed) throw new Error("This wallet cannot export an XRPL family seed");
+  // Only a local browser download; NEVER upload to the app server or faucet.
+  exportJson({
+    format:"XRPMan-Disposable-Test-Wallet",version:1,network:currentNetwork(),
+    address:wallet.address,seed:wallet.seed
+  },"xrpman-"+currentNetwork()+"-wallet-"+wallet.address+".json");
+  $("backupStatus").textContent="Test wallet JSON backup download requested. Check your device's Downloads before closing this page.";
+}
+async function refreshBalance() {
+  walletFunded=false;
+  if(!wallet || !client?.isConnected()) {
+    $("balance").textContent="—";
+    syncControls();
+    return 0n;
+  }
+  try {
+    const drops=await readValidatedDrops(client,wallet.address);
+    walletFunded=drops>0n;
+    $("balance").textContent=(Number(drops)/1000000).toFixed(6)+" TEST XRP";
+    syncControls();
+    return drops;
+  } catch (error) {
+    $("balance").textContent="Ledger lookup failed";
+    walletFunded=false;
+    syncControls();
+    throw error;
+  }
+}
+function forgetWallet() {
+  if(wallet && !confirm("Disconnect this test wallet? Save its JSON backup first if you plan to resume an archive."))
+    return;
+  wallet=null;walletFunded=false;
+  $("walletAddr").textContent="Not loaded";$("balance").textContent="—";
+  $("seedFile").value="";
+  $("walletState").textContent="Disconnected. Click Connect Test Wallet for a new disposable account.";
+  $("netStatus").textContent=client?.isConnected()?"Node connected, no wallet":"Not connected";
+  txLog("Wallet cleared from app state. Browser memory cannot be guaranteed erased.");
+  syncControls();
+}
+async function connectTestWallet() {
   if (busy)return;
   setBusy(true);
-  try{
-    const selected=currentNetwork();
-    if (!SERVERS[selected])throw new Error("Network not allowed");
-    if(client){try{await client.disconnect()}catch{}}
-    client=new xrpl.Client(SERVERS[selected],{connectionTimeout:10000,timeout:15000});
-    await client.connect();
-    const server=await client.request({command:"server_info"});
-    const infoObj=server.result.info || {};
-    $("netStatus").textContent="Connected · "+(infoObj.complete_ledgers||"ledger availability varies");
-    $("networkLabel").textContent=selected.toUpperCase();
-    txLog("Connected to "+selected+"; server "+(infoObj.build_version||"unknown"));
-    if(wallet)await refreshBalance();
-  }catch(e){ $("netStatus").textContent="Connection failed"; txLog("NETWORK ERROR: "+safeText(e));client=null }
-  finally{setBusy(false)}
-}
-async function refreshBalance(){
-  if(!wallet||!client?.isConnected())return;
-  try{
-    const r=await client.request({command:"account_info",account:wallet.address,ledger_index:"validated"});
-    $("balance").textContent=(Number(r.result.account_data.Balance)/1000000).toFixed(6)+" XRP";
-  }catch{ $("balance").textContent="Unfunded / unavailable"; }
-}
-function forgetWallet(){
-  wallet=null; $("walletAddr").textContent="Not loaded"; $("balance").textContent="—"; $("seedFile").value="";
-  txLog("Wallet removed from in-memory app state (browser cannot guarantee immediate memory erasure).");
-  syncControls();
+  const selected=currentNetwork();
+  let created=false;
+  try {
+    assertTestNetwork(selected);
+    if(!wallet) {
+      // Wallet keys are generated on this device, not by the faucet.
+      wallet=xrpl.Wallet.generate();
+      created=true;
+      walletFunded=false;
+      $("walletAddr").textContent=wallet.address;
+      $("walletState").textContent="Wallet generated locally · requesting Testnet XRP...";
+      // Run backup within the originating click before any asynchronous await.
+      walletBackup();
+      txLog("Disposable "+selected+" wallet generated: "+wallet.address+" · JSON download requested");
+    }
+    $("netStatus").textContent="Connecting to "+selected.toUpperCase()+"...";
+    await connectNetwork();
+    const funding=await fundAndVerifyTestWallet({
+      client,wallet,network:selected,
+      onStatus: stage => {
+        if(stage==="request-faucet")$("walletState").textContent="Requesting free "+selected+" XRP from the test faucet...";
+        if(stage==="verify-ledger")$("walletState").textContent="Checking confirmed wallet balance on the "+selected+" ledger...";
+      }
+    });
+    walletFunded=funding.balanceDrops>0n;
+    $("balance").textContent=(Number(funding.balanceDrops)/1000000).toFixed(6)+" TEST XRP";
+    $("walletState").textContent=walletFunded ? "Testnet wallet connected and funded. Ready to prepare a file." : "Waiting for validated funding.";
+    $("netStatus").textContent=walletFunded?"Connected & funded":"Connected · awaiting funds";
+    txLog("VALIDATED "+selected+" balance for "+wallet.address+": "+funding.balanceDrops+" drops"+
+      (funding.alreadyFunded?" (existing funded account)":" (faucet funded)"));
+    info("Test wallet is funded. Choose a file and press Prepare file.");
+  } catch(error) {
+    walletFunded=false;
+    $("walletState").textContent="Not funded yet: "+safeText(error);
+    $("netStatus").textContent="Not ready · press Retry Test Wallet";
+    txLog("WALLET NOT FUNDED: "+safeText(error)+" · same wallet kept for retry");
+    // Never silently create a replacement wallet when faucet / network is unavailable.
+  } finally {
+    setBusy(false);
+  }
 }
 async function importWallet(){
   if (busy)return;
   const file=$("seedFile").files[0];
-  if(!file)throw new Error("Choose a local JSON wallet file first");
+  if(!file)throw new Error("Choose a local JSON wallet backup file first");
   if(file.size>4096)throw new Error("Wallet JSON over 4 KB is not accepted");
   setBusy(true);
   try{
     const data=JSON.parse(await file.text());
-    // Intentionally accept only narrowly-defined XRPL seed fields; no network calls with seed.
-    const seed = data?.seed ?? data?.familySeed ?? data?.wallet?.seed;
+    const seed=data?.seed ?? data?.familySeed ?? data?.wallet?.seed;
     if(typeof seed!=="string" || !/^s[1-9A-HJ-NP-Za-km-z]{15,60}$/.test(seed))
-      throw new Error("JSON must contain an XRPL family seed (s...) in seed, familySeed or wallet.seed. Mnemonics are not accepted.");
-    const localWallet=xrpl.Wallet.fromSeed(seed);
-    wallet=localWallet; $("walletAddr").textContent=wallet.address;
+      throw new Error("Wallet JSON must contain an XRPL family seed (s...).");
+    assertTestNetwork(currentNetwork());
+    if(data?.network && data.network!==currentNetwork())
+      throw new Error("Wallet backup is for "+data.network+"; change network before restoring");
+    const restored=xrpl.Wallet.fromSeed(seed);
+    if(data?.address && data.address!==restored.address)
+      throw new Error("Wallet backup address does not match seed");
+    wallet=restored;walletFunded=false;
+    $("walletAddr").textContent=wallet.address;
     $("seedFile").value="";
-    txLog("Wallet loaded locally: "+wallet.address+" (seed never logged or persisted)");
-    await refreshBalance();
-    info("Wallet loaded. This does not submit anything. Prepare a file and review fee gates.");
-  }catch(e){forgetWallet();throw e}finally{setBusy(false)}
+    $("walletState").textContent="Wallet restored locally. Press Connect Test Wallet to check and fund if needed.";
+    txLog("Test wallet restored locally: "+wallet.address+" (secret not logged)");
+    if(client?.isConnected()) {
+      try { await refreshBalance(); } catch {
+        $("walletState").textContent="Wallet restored; node lookup failed. Use Connect Test Wallet to retry.";
+      }
+    }
+    if(walletFunded) $("walletState").textContent="Test wallet restored and funded. Ready.";
+  } finally {setBusy(false);}
 }
 async function prepareFile(){
   if(busy)return;
   const file=$("sourceFile").files[0];
   if(!file)throw new Error("Choose a file");
   if(file.size<1 || file.size>MAX_FILE_BYTES) throw new Error("Allowed file size: 1 byte to 5 MiB (streaming uploads planned later)");
-  if(!wallet)throw new Error("Import your disposable test wallet first");
+  if(!wallet || !walletFunded)throw new Error("Press Connect Test Wallet first; funding must be verified.");
   assertConnected();
   setBusy(true);
   try{
@@ -361,7 +451,8 @@ async function readLedger(){
 function on(id,cb){
   $(id).addEventListener("click",async()=>{try{await cb()}catch(e){txLog("ERROR "+safeText(e));info("ERROR: "+safeText(e));if(id==="loadReceipt"||id==="readLedger")$("readStatus").textContent="ERROR: "+safeText(e)}finally{syncControls()}});
 }
-on("connect",connectNetwork);on("importWallet",importWallet);on("forgetWallet",()=>forgetWallet());
+on("connect",connectTestWallet);on("importWallet",importWallet);on("forgetWallet",()=>forgetWallet());
+on("backupWallet",()=>walletBackup());
 on("prepare",prepareFile);on("submit",submitGroups);on("resolve",resolvePendingAction);
 on("mint",mintNFT);on("loadReceipt",readReceiptFile);on("readLedger",readLedger);
 on("export",()=>{if(receipt)exportJson(receipt,"xrpman-receipt-"+receipt.manifest.sha256.slice(0,16)+".json")});
@@ -373,8 +464,10 @@ on("clearCheckpoint",()=>{
 });
 $("consent").addEventListener("change",syncControls);
 $("network").addEventListener("change",async()=>{
-  wallet=null;rawBytes=null;receipt=null;readerReceipt=null;
+  wallet=null;walletFunded=false;rawBytes=null;receipt=null;readerReceipt=null;
   $("walletAddr").textContent="Not loaded";$("balance").textContent="—";
+  $("walletState").textContent="Network changed. Press Connect Test Wallet to generate and fund a new test account.";
+  $("backupStatus").textContent="The new wallet will request a JSON backup download. Save it for recovery.";
   if(client){try{await client.disconnect()}catch{}client=null}
   $("netStatus").textContent="Not connected. Wallet erased from app state on network change.";
   $("networkLabel").textContent=currentNetwork().toUpperCase();
