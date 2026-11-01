@@ -1,8 +1,17 @@
-# XRPMan Memo Minter — v0.3.1 TESTNET HOTFIX
+# XRPMan Memo Minter — v0.3.2 TESTNET HOTFIX
 
 **STATUS: DEVELOPMENT BRANCH / UNVERIFIED LIVE XRPL TRANSACTIONS. MAINNET DISABLED.**
 
 Experimental browser app for writing actual binary data to XRPL transaction memos, retrieving chunks from **validated ledger transaction hashes**, and minting an archive NFT. Supports pictures, songs, video, PDFs and arbitrary bytes (up to 5 MiB in this version). Every byte of the original file is reconstructed and verified against SHA-256.
+
+## v0.3.2 — Visible debugger, foreground auto-resume and local self-custody import
+- Added a **Debug & Logs** button in the normal page header in addition to the floating ladybug. A tiny, separate same-origin \`/debug-boot.js\` script runs **before** the main XRPL module; if the app bundle fails to load, the header/button still opens a fallback log. The app diagnostic module takes over the pane without installing duplicate click handlers. Debug health reports "Debug active"; no telemetry endpoint is used.
+- **Load My Wallet** is visible on the wallet panel. Loading a local Testnet/Devnet wallet JSON derives the signer **in the browser**, opens the matching test ledger, and validates its existing XRP balance. No faucet call if the imported wallet is already funded; no seed/secret transfer to Vercel or the diagnostic log. The file currently must contain signing material locally (XRPL family seed); an external wallet such as Xaman is a separate future signer integration. **Never import a Mainnet wallet seed into an unaudited preview.** Mainnet balances and tokens are not available on this Testnet page.
+- The old unconditional "pause on \`visibilitychange\`" behavior is replaced with an **event-driven foreground/offline hold**. It waits *before the next signature*, then automatically reconnects and resumes the **same active approved upload** when the browser tab becomes visible and online again. Manual Pause still stops. No unsigned or unresolved transaction is silently resubmitted. Browser process termination/reload cannot retain the in-memory key, loaded bytes or fee authorization, and requires restore + file re-selection + renewed approval after exact-hash reconciliation.
+- Live status updates every 5 seconds while in the foreground; it reports validated chunk progress, last activity and connection status. Idle wallet-balance polling is read-only and throttled to at most every 30 seconds. A manual **Refresh Status** button is available. High-rate diagnostic logging is deliberately suppressed for timer-only UI updates.
+- Tests cover hidden/offline hold and resume, manual pause precedence, wake listener cleanup, independent/debug boot when app code fails, and no double-toggle. Existing read-only peer and Mainnet lock remain unchanged.
+- **Not a background uploader.** Mobile OS suspension can freeze JavaScript and close WebSocket connections. Continuing uploads while the app is *closed* would require a distinct user-authorized presigned/relayer design with bounded expiry, replay protection and explicit payment caps; never an unattended server holding wallet secrets.
+- Keep PR draft until a real user-device test proves an in-flight upload can hold, resume, reconcile pending hashes and export diagnostics without duplication. The old running browser tab retains the old code and cannot be hot-patched.
 
 ## v0.3.1 — Faster read-only verification + persistent ladybug (performance hotfix)
 - **Bottleneck found:** After each validated outer Batch, previous implementation read all eight inner hashes sequentially. Each outer batch was held until eight separate read round trips completed.
