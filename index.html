@@ -5,8 +5,36 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; connect-src 'self' wss://s.altnet.rippletest.net:51233 wss://s.devnet.rippletest.net:51233 https://faucet.altnet.rippletest.net https://faucet.devnet.rippletest.net; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'"/><meta name="description" content="XRPMan on-ledger memo archive and NFT minter, Testnet and Devnet."/>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:#050905;color:#f2fff3}*{box-sizing:border-box}body{margin:0 auto;padding:18px 16px 60px;max-width:1060px}h1{color:#00ff00;letter-spacing:-.04em;margin:0;font-size:clamp(27px,5vw,43px)}h2{margin:0 0 12px;color:#00ff00;font-size:20px}h3{font-size:15px;color:#dfffe4}.sub{color:#a2bca9;margin-top:4px}.pill{display:inline-block;border:1px solid #20632c;padding:6px 10px;border-radius:30px;font-size:12px;color:#9cff9c;margin:12px 0}.warn{border-left:3px solid #d7a83a;color:#f7dca7;padding:9px 12px;background:#211e0f}.bad{color:#ff8e8e}.good{color:#00ff00}.muted{color:#a5b7a6}.panel{background:#0e160f;border:1px solid #25502a;border-radius:14px;padding:18px;margin:18px 0}button{font:inherit;background:#00ff00;border:0;border-radius:8px;font-weight:700;padding:12px 18px;color:#001b05;cursor:pointer;margin:6px 6px 6px 0}button:disabled{opacity:.4;cursor:not-allowed}.secondary{background:#253829;color:#f1fff3;border:1px solid #43824c}.danger{background:#642728;color:#fff}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.stat{background:#061007;border-radius:9px;padding:12px}.stat strong{display:block;font-size:19px;color:#00ff00;overflow-wrap:anywhere}.stat span{color:#9db4a1;font-size:12px}input,select,textarea{font:inherit;background:#071009;color:#f3fff5;border:1px solid #3a6a43;padding:12px;border-radius:8px;max-width:100%}input[type=file]{display:block;width:100%;margin:9px 0;padding:16px;border:1px dashed #3e8045}input[type=checkbox]{margin-right:9px;vertical-align:middle}input[type=number]{max-width:85px}textarea{width:100%;min-height:118px;font-size:12px;resize:vertical}.row{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.row>*{flex-shrink:0}label{display:block;margin:8px 0;color:#e0efe0}.stack>*{margin-bottom:9px}a{color:#00ff00}progress{width:100%;height:16px;accent-color:#00ff00}.log{white-space:pre-wrap;overflow-wrap:anywhere;background:#050b06;border:1px solid #1c3c23;padding:14px;max-height:230px;overflow:auto;font:12px/1.6 ui-monospace,monospace}.section-desc{color:#b4c3b6;font-size:14px}.notice{margin-bottom:8px}.red{color:#ff9090}#preview{margin:14px 0}#preview img,#preview video{max-width:100%;max-height:400px;border-radius:10px}#preview audio{width:100%}code{color:#a9ffaa;word-break:break-all}footer{font-size:12px;color:#829889;padding-top:20px}
+
+/* Visible local progress, separate from ledger-confirmation progress. */
+.prepare-status{margin:10px 0;padding:12px 13px;border:1px solid #326a3f;border-radius:9px;background:#071009;color:#d6ffe2;font-size:14px}
+.prepare-status.error{border-color:#a34747;color:#ffb3b3}
+.prepare-status.ready{border-color:#168b43;color:#00ff00}
+.prepare-work{display:grid;grid-template-columns:24px 1fr;align-items:center;column-gap:10px;padding:10px 0}
+.prepare-work[hidden]{display:none}
+.prepare-work progress{grid-column:2;max-width:100%;margin-top:5px}
+.prepare-work .spinner{width:21px;height:21px;border:3px solid #24592d;border-top-color:#00ff00;border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ledger-label{font-size:12px;color:#8fae96;margin:8px 0 2px}
+/* Compact fixed ladybug: diagnostics are completely local and user-exported. */
+#ladybugToggle{position:fixed;right:12px;bottom:12px;z-index:1001;width:45px;height:45px;border-radius:50%;padding:0;margin:0;background:#c92828;color:#050505;border:2px solid #171717;box-shadow:0 4px 15px #000b;font-size:26px;display:grid;place-items:center;line-height:1;transform:none}
+#ladybugToggle:focus-visible{outline:3px solid #00ff00;outline-offset:3px}
+#debugCount{position:absolute;right:-3px;top:-4px;background:#fff;color:#990000;border:1px solid #990000;border-radius:20px;padding:0 4px;font-size:10px;line-height:16px;min-width:16px}
+#debugCount[hidden],#debugPanel[hidden]{display:none!important}
+#debugPanel{position:fixed;right:10px;bottom:65px;z-index:1000;width:min(390px,calc(100vw - 20px));max-height:min(65vh,560px);display:flex;flex-direction:column;padding:12px;background:#0a120c;border:2px solid #ba3f3f;border-radius:14px;box-shadow:0 12px 35px #000d}
+#debugPanel h2{font-size:16px;margin:0;color:#ff8c8c}
+.debug-header{display:flex;justify-content:space-between;gap:12px;align-items:center}
+#debugClose{font-size:18px;background:#311619;color:#f4efef;padding:4px 10px;margin:0}
+.debug-actions{display:flex;flex-wrap:wrap;gap:5px;padding:8px 0}
+.debug-actions button{font-size:12px;padding:7px 9px;margin:0;background:#253829;color:#fff;border:1px solid #335e3a}
+#debugLast{font-size:12px;color:#a6c5ac;overflow-wrap:anywhere}
+#debugEntries{min-height:80px;overflow:auto;overscroll-behavior:contain;background:#030803;padding:7px;border-radius:7px;border:1px solid #24422b;font:11px/1.5 ui-monospace,SFMono-Regular,monospace}
+.debug-entry{padding:7px 4px;border-bottom:1px solid #203527;overflow-wrap:anywhere;white-space:pre-wrap}
+.debug-entry small{color:#91b699}
+.debug-error{border-left:3px solid #e04545;color:#ffd6d6;padding-left:8px}
+@media(max-width:540px){#debugPanel{max-height:65dvh}#ladybugToggle{right:10px;bottom:max(10px,env(safe-area-inset-bottom))}#debugPanel{bottom:calc(65px + env(safe-area-inset-bottom))}}
 </style></head><body>
-<header><h1>XRPMAN <span style="color:#fff">MEMO MINTER</span></h1><div class="sub">REAL XRPL DATA STORAGE · BATCHES · ARCHIVE READER · NFT ANCHOR</div><span class="pill">v0.2.1 • ONE-TAP TEST WALLET • MAINNET DISABLED</span></header>
+<header><h1>XRPMAN <span style="color:#fff">MEMO MINTER</span></h1><div class="sub">REAL XRPL DATA STORAGE · BATCHES · ARCHIVE READER · NFT ANCHOR</div><span class="pill">v0.2.2 • LADYBUG DEBUG + PREPARE PROGRESS • MAINNET DISABLED</span></header>
 <div class="warn">Use a disposable Testnet wallet only. One button creates it locally, requests free Testnet XRP from the XRPL faucet, and verifies the ledger balance. Save your downloaded test-wallet backup to resume later; the seed is never uploaded to our site. Never reuse a Mainnet seed. Ledger data is public.</div>
 <section class="panel"><h2>01 / One-tap Test Wallet</h2>
 <p class="section-desc">No separate faucet website or manual seed entry. Press the button once; this app creates a disposable XRPL wallet in your browser, requests free test XRP, and verifies it from a validated ledger.</p>
@@ -21,8 +49,13 @@
 <p class="section-desc">The JSON contains your test seed; do not share it. Format: <code>{"seed":"s..."}</code>. Restoration stays inside your browser.</p>
 </details></section>
 <section class="panel"><h2>02 / Encode &amp; archive</h2><p class="section-desc">Choose a file. This produces a SHA-256 manifest and a verified protocol envelope for each chunk; your original bytes are not modified.</p>
-<input id="sourceFile" type="file"/><div class="row"><button id="prepare">Prepare file</button><button id="export" class="secondary" disabled>Export upload receipt</button><button id="clearCheckpoint" class="danger">Discard local checkpoint</button></div>
-<div class="grid"><div class="stat"><strong id="fileName">—</strong><span>File</span></div><div class="stat"><strong id="fileSize">—</strong><span>File size</span></div><div class="stat"><strong id="chunkCount">—</strong><span>Number of data transactions</span></div><div class="stat"><strong id="batchCount">—</strong><span>Projected Batch transactions</span></div><div class="stat"><strong id="doneCount">0</strong><span>Verified chunks on ledger</span></div><div class="stat"><strong id="hashShort">—</strong><span>SHA-256 digest</span></div></div><progress id="progress" value="0" max="1"></progress>
+<input id="sourceFile" type="file"/>
+<div id="prepareStatus" class="prepare-status" role="status" aria-live="polite">Select a file, then press Prepare file.</div>
+<div id="prepareWork" class="prepare-work" hidden role="status" aria-live="polite">
+<span class="spinner" aria-hidden="true"></span><strong id="prepareStage">Preparing file…</strong>
+<progress id="prepareReadProgress" max="100" value="0" aria-label="File read progress"></progress></div>
+<div class="row"><button id="prepare">Prepare file</button><button id="export" class="secondary" disabled>Export upload receipt</button><button id="clearCheckpoint" class="danger">Discard local checkpoint</button></div>
+<div class="grid"><div class="stat"><strong id="fileName">—</strong><span>File</span></div><div class="stat"><strong id="fileSize">—</strong><span>File size</span></div><div class="stat"><strong id="chunkCount">—</strong><span>Number of data transactions</span></div><div class="stat"><strong id="batchCount">—</strong><span>Projected Batch transactions</span></div><div class="stat"><strong id="doneCount">0</strong><span>Verified chunks on ledger</span></div><div class="stat"><strong id="hashShort">—</strong><span>SHA-256 digest</span></div></div><div class="ledger-label">Confirmed on-ledger upload progress (not local preparation)</div><progress id="progress" value="0" max="1"></progress>
 <p class="section-desc" id="archiveId">No prepared file</p>
 </section>
 <section class="panel"><h2>03 / Real transaction submissions</h2><p class="section-desc">Use native XRPL Batch for groups of 2–8 transactions when supported by the selected network. Single mode is available for compatibility. One button press submits at most the selected number of outer transactions, sequentially, with a ledger verification gate after each.</p>
@@ -37,4 +70,15 @@
 <div class="log" id="readStatus">No receipt loaded.</div><div id="preview"></div><a id="downloadFile" hidden download>Download verified file</a>
 </section><section class="panel"><h2>05 / Ledger receipts</h2><div class="log" id="txLog">No transactions submitted.</div></section>
 <footer>XRPMan Memo Minter • Non-custodial browser signer (test wallets only) • No servers receiving seeds • Not a production security audit</footer>
+<button type="button" id="ladybugToggle" aria-label="Open ladybug debug log" aria-expanded="false" aria-controls="debugPanel" title="Debug log">🐞<span id="debugCount" hidden></span></button>
+<aside id="debugPanel" role="dialog" aria-label="Ladybug diagnostic log" hidden>
+<div class="debug-header"><h2>🐞 Ladybug Debug</h2><button id="debugClose" type="button" aria-label="Close debug log">×</button></div>
+<div id="debugLast">No events yet</div>
+<div class="debug-actions">
+<button id="debugDownload" type="button">Download Log</button>
+<button id="debugCopy" type="button">Copy Log</button>
+<button id="debugClear" type="button">Clear</button>
+</div>
+<p class="section-desc" style="font-size:11px;margin:0 0 6px">Local only. Records UI, file stages, network outcomes and errors. No seeds, raw media or signed blobs.</p>
+<div id="debugEntries" aria-live="off"></div></aside>
 <script type="module" src="/src/main.js"></script></body></html>
