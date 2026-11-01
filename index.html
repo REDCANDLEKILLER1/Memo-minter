@@ -4,7 +4,7 @@
 <meta name="theme-color" content="#050b06"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; connect-src 'self' wss://s.altnet.rippletest.net:51233 wss://s.devnet.rippletest.net:51233 https://faucet.altnet.rippletest.net https://faucet.devnet.rippletest.net; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'"/><meta name="description" content="XRPMan on-ledger memo archive and NFT minter, Testnet and Devnet."/>
 <style>
-:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:#050905;color:#f2fff3}*{box-sizing:border-box}body{margin:0 auto;padding:18px 16px 60px;max-width:1060px}h1{color:#00ff00;letter-spacing:-.04em;margin:0;font-size:clamp(27px,5vw,43px)}h2{margin:0 0 12px;color:#00ff00;font-size:20px}h3{font-size:15px;color:#dfffe4}.sub{color:#a2bca9;margin-top:4px}.pill{display:inline-block;border:1px solid #20632c;padding:6px 10px;border-radius:30px;font-size:12px;color:#9cff9c;margin:12px 0}.warn{border-left:3px solid #d7a83a;color:#f7dca7;padding:9px 12px;background:#211e0f}.bad{color:#ff8e8e}.good{color:#00ff00}.muted{color:#a5b7a6}.panel{background:#0e160f;border:1px solid #25502a;border-radius:14px;padding:18px;margin:18px 0}button{font:inherit;background:#00ff00;border:0;border-radius:8px;font-weight:700;padding:12px 18px;color:#001b05;cursor:pointer;margin:6px 6px 6px 0}button:disabled{opacity:.4;cursor:not-allowed}.secondary{background:#253829;color:#f1fff3;border:1px solid #43824c}.danger{background:#642728;color:#fff}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.stat{background:#061007;border-radius:9px;padding:12px}.stat strong{display:block;font-size:19px;color:#00ff00;overflow-wrap:anywhere}.stat span{color:#9db4a1;font-size:12px}input,select,textarea{font:inherit;background:#071009;color:#f3fff5;border:1px solid #3a6a43;padding:12px;border-radius:8px;max-width:100%}input[type=file]{display:block;width:100%;margin:9px 0;padding:16px;border:1px dashed #3e8045}input[type=checkbox]{margin-right:9px;vertical-align:middle}input[type=number]{max-width:85px}textarea{width:100%;min-height:118px;font-size:12px;resize:vertical}.row{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.row>*{flex-shrink:0}label{display:block;margin:8px 0;color:#e0efe0}.stack>*{margin-bottom:9px}a{color:#00ff00}progress{width:100%;height:16px;accent-color:#00ff00}.log{white-space:pre-wrap;overflow-wrap:anywhere;background:#050b06;border:1px solid #1c3c23;padding:14px;max-height:230px;overflow:auto;font:12px/1.6 ui-monospace,monospace}.section-desc{color:#b4c3b6;font-size:14px}.notice{margin-bottom:8px}.red{color:#ff9090}#preview{margin:14px 0}#preview img,#preview video{max-width:100%;max-height:400px;border-radius:10px}#preview audio{width:100%}code{color:#a9ffaa;word-break:break-all}footer{font-size:12px;color:#829889;padding-top:20px}
+:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:#050905;color:#f2fff3}*{box-sizing:border-box}body{margin:0 auto;padding:18px 16px 105px;max-width:1060px}h1{color:#00ff00;letter-spacing:-.04em;margin:0;font-size:clamp(27px,5vw,43px)}h2{margin:0 0 12px;color:#00ff00;font-size:20px}h3{font-size:15px;color:#dfffe4}.sub{color:#a2bca9;margin-top:4px}.pill{display:inline-block;border:1px solid #20632c;padding:6px 10px;border-radius:30px;font-size:12px;color:#9cff9c;margin:12px 0}.warn{border-left:3px solid #d7a83a;color:#f7dca7;padding:9px 12px;background:#211e0f}.bad{color:#ff8e8e}.good{color:#00ff00}.muted{color:#a5b7a6}.panel{background:#0e160f;border:1px solid #25502a;border-radius:14px;padding:18px;margin:18px 0}button{font:inherit;background:#00ff00;border:0;border-radius:8px;font-weight:700;padding:12px 18px;color:#001b05;cursor:pointer;margin:6px 6px 6px 0}button:disabled{opacity:.4;cursor:not-allowed}.secondary{background:#253829;color:#f1fff3;border:1px solid #43824c}.danger{background:#642728;color:#fff}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.stat{background:#061007;border-radius:9px;padding:12px}.stat strong{display:block;font-size:19px;color:#00ff00;overflow-wrap:anywhere}.stat span{color:#9db4a1;font-size:12px}input,select,textarea{font:inherit;background:#071009;color:#f3fff5;border:1px solid #3a6a43;padding:12px;border-radius:8px;max-width:100%}input[type=file]{display:block;width:100%;margin:9px 0;padding:16px;border:1px dashed #3e8045}input[type=checkbox]{margin-right:9px;vertical-align:middle}input[type=number]{max-width:85px}textarea{width:100%;min-height:118px;font-size:12px;resize:vertical}.row{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.row>*{flex-shrink:0}label{display:block;margin:8px 0;color:#e0efe0}.stack>*{margin-bottom:9px}a{color:#00ff00}progress{width:100%;height:16px;accent-color:#00ff00}.log{white-space:pre-wrap;overflow-wrap:anywhere;background:#050b06;border:1px solid #1c3c23;padding:14px;max-height:230px;overflow:auto;font:12px/1.6 ui-monospace,monospace}.section-desc{color:#b4c3b6;font-size:14px}.notice{margin-bottom:8px}.red{color:#ff9090}#preview{margin:14px 0}#preview img,#preview video{max-width:100%;max-height:400px;border-radius:10px}#preview audio{width:100%}code{color:#a9ffaa;word-break:break-all}footer{font-size:12px;color:#829889;padding-top:20px}
 
 /* Visible local progress, separate from ledger-confirmation progress. */
 .prepare-status{margin:10px 0;padding:12px 13px;border:1px solid #326a3f;border-radius:9px;background:#071009;color:#d6ffe2;font-size:14px}
@@ -102,7 +102,7 @@ padding:10px;background:#08110a;color:#a8e5b0;font-size:13px;white-space:pre-wra
 .flow-status{display:flex;align-items:center;justify-content:space-between;gap:12px;
 font-size:13px;color:#b6ddbb;margin:18px 0 4px;padding:0 2px}
 #flowStepLabel{font-weight:700;color:#00ff00}
-.flow-controls{position:sticky;bottom:0;z-index:90;display:grid;grid-template-columns:1fr 1fr 1.5fr;
+.flow-controls{position:fixed;bottom:0;left:0;right:0;max-width:1060px;margin:0 auto;z-index:110;display:grid;grid-template-columns:1fr 1fr 1.5fr;
 gap:8px;padding:12px 8px calc(12px + env(safe-area-inset-bottom,0px));background:#050905f2;
 border-top:1px solid #2a6135;margin-bottom:20px;backdrop-filter:blur(7px)}
 .flow-controls button{margin:0;min-width:0;min-height:46px;font-size:14px;padding:10px 8px}
@@ -125,7 +125,7 @@ align-items:center;gap:9px;background:#102515f5;border:1px solid #357f46;border-
 .upload-strip strong{font-size:12px;color:#c9ffce;overflow-wrap:anywhere}
 .upload-strip progress{height:11px}
 .upload-strip button{font-size:12px;padding:8px;margin:0}
-@media(max-width:540px){body{padding:12px 12px 50px}
+@media(max-width:540px){body{padding:12px 12px 105px}
 .flow-card{padding:16px 13px;min-height:50dvh}
 .flow-controls{margin-left:-4px;margin-right:-4px}
 .flow-controls button{font-size:13px}
@@ -156,7 +156,7 @@ align-items:center;gap:9px;background:#102515f5;border:1px solid #357f46;border-
 <div class="home-actions"><button id="homeStartMint" type="button" class="hero-action">Start Minting</button><button id="homeOpenGallery" type="button" class="secondary">My Gallery</button></div>
 <div class="prepare-status" id="homeUploadSummary" role="status">No upload in progress. Your Testnet wallet remains self-custodial.</div>
 </section>
-<section class="panel flow-card" id="walletSection" data-flow-step="wallet"><h2>Connect Test Wallet</h2>
+<section class="panel flow-card" id="walletSection" data-flow-step="wallet" hidden><h2>Connect Test Wallet</h2>
 <p class="section-desc">No separate faucet website or manual seed entry. Press the button once; this app creates a disposable XRPL wallet in your browser, requests free test XRP, and verifies it from a validated ledger.</p>
 <div class="row"><label>Network <select id="network"><option value="testnet">XRPL Testnet</option><option value="devnet">XRPL Devnet (advanced)</option></select></label><button id="connect">Connect Test Wallet</button><span id="netStatus" class="muted">Not connected</span></div>
 <p id="walletState" class="section-desc" aria-live="polite">Ready to create and fund a test wallet.</p>
@@ -168,7 +168,7 @@ align-items:center;gap:9px;background:#102515f5;border:1px solid #357f46;border-
 <button id="importWallet" class="secondary">Load My Wallet</button>
 <p class="section-desc">Your wallet file is read on this device. Nothing is uploaded; your private signing material is never saved to Vercel. Testnet/Devnet only for this build.</p>
 </div></section>
-<section class="panel flow-card" id="uploadSection" data-flow-step="upload"><h2>Upload Your Media</h2>
+<section class="panel flow-card" id="uploadSection" data-flow-step="upload" hidden><h2>Upload Your Media</h2>
 <p class="section-desc">Upload a picture, song, video, PDF or other file. Memo Minter automatically divides it into XRPL transaction data and prepares your archive. You don't have to do anything technical.</p>
 <label class="drop-media" for="sourceFile"><strong>Choose an image, song, video or file</strong><span>Tap to select media · currently up to 5 MiB (larger video support is a later upgrade)</span>
 <input id="sourceFile" type="file" aria-label="Choose media to mint"></label>
@@ -193,7 +193,7 @@ align-items:center;gap:9px;background:#102515f5;border:1px solid #357f46;border-
 <p class="usage-note">A receipt contains transaction hashes and the archive manifest, not the uploaded file or your wallet seed.</p>
 </details>
 </section>
-<section class="panel flow-card" id="mintSection" data-flow-step="mint"><h2>Pay &amp; Mint</h2>
+<section class="panel flow-card" id="mintSection" data-flow-step="mint" hidden><h2>Pay &amp; Mint</h2>
 <p class="section-desc">Approve the total Testnet fee budget once. The app submits the required batches sequentially, verifies each on the ledger, and mints one NFT when the complete file checks out.</p>
 <div id="quoteBox" class="quote-box" role="status">
 <strong id="quotePrice">Upload a file to calculate the price.</strong>
@@ -217,7 +217,7 @@ align-items:center;gap:9px;background:#102515f5;border:1px solid #357f46;border-
 <p class="usage-note">The automated uploader has a strict 1 Test XRP per-session fee limit, 0.2 XRP maximum per outer transaction, and stops if any signed transaction outcome is uncertain. Mainnet and the 2 XRP platform charge remain disabled.</p>
 </details>
 </section>
-<section class="panel flow-card" id="gallerySection" data-flow-step="gallery"><h2>My Gallery</h2>
+<section class="panel flow-card" id="gallerySection" data-flow-step="gallery" hidden><h2>My Gallery</h2>
 <p class="section-desc">See your completed NFTs and archives. Tap an item to reconstruct its media from validated XRPL transaction history. Your saved archive receipts remain on this device; you can export and restore them.</p>
 <div class="row"><button id="refreshGallery" class="secondary">Refresh Gallery</button></div>
 <div id="galleryStatus" class="section-desc" role="status">No gallery items loaded yet.</div>
@@ -256,4 +256,4 @@ align-items:center;gap:9px;background:#102515f5;border:1px solid #357f46;border-
 </div>
 <p class="section-desc" style="font-size:11px;margin:0 0 6px">Local only. Records UI, file stages, network outcomes and errors. No seeds, raw media or signed blobs.</p>
 <div id="debugEntries" aria-live="off"></div></aside>
-<script src="/debug-boot.js" defer></script><script type="module" src="/src/main.js"></script></body></html>
+<script src="/flow-nav.js" defer></script><script src="/debug-boot.js" defer></script><script type="module" src="/src/main.js"></script></body></html>
