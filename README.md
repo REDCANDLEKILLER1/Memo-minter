@@ -1,8 +1,17 @@
-# XRPMan Memo Minter — v0.3 AUTOMATED TESTNET
+# XRPMan Memo Minter — v0.3.1 TESTNET HOTFIX
 
 **STATUS: DEVELOPMENT BRANCH / UNVERIFIED LIVE XRPL TRANSACTIONS. MAINNET DISABLED.**
 
 Experimental browser app for writing actual binary data to XRPL transaction memos, retrieving chunks from **validated ledger transaction hashes**, and minting an archive NFT. Supports pictures, songs, video, PDFs and arbitrary bytes (up to 5 MiB in this version). Every byte of the original file is reconstructed and verified against SHA-256.
+
+## v0.3.1 — Faster read-only verification + persistent ladybug (performance hotfix)
+- **Bottleneck found:** After each validated outer Batch, previous implementation read all eight inner hashes sequentially. Each outer batch was held until eight separate read round trips completed.
+- New `mapValidatedParallel` worker pool verifies up to **3 inner transactions concurrently**, preserves strict result ordering, and aborts the batch without marking it complete if any inner hash cannot be proved valid. Signing and outer submissions remain **strictly sequential** (no speculative Sequence or Ticket reuse).
+- A **separate read-only** Honeycluster endpoint is optionally connected after one-time user approval: `wss://testnet.honeycluster.io/` (or `wss://devnet.honeycluster.io/`). Half the inner-hash queries prefer that peer. If unavailable or lagging, the app falls back to the primary Testnet/Devnet node using the same exact transaction hash and validates the returned ledger result. **No secrets or signed blobs are ever sent to the read peer**, and no submit calls target it. These read lanes do not enable Mainnet.
+- Per-batch diagnostic timings include `tx.submit.timing` and `tx.reconcile.success` with `elapsedMs` and `readConcurrency`, so device logs can reveal actual bottlenecks.
+- Ladybug button remains a fixed **upper-right mobile-safe overlay** at high stacking priority. Debug history is still bounded to 350 redacted events, but event persistence is debounced (750 ms; error events flushed immediately) and visible log re-rendering is throttled (120 ms) to avoid overloading mobile browsers during thousands of checks. `pagehide` and Download Log flush the buffer.
+- **A running upload in an old browser tab does not hot-swap to this code.** Its signed transaction results should be verified and the checkpoint exported before resuming in the revised preview. Do not refresh or start a second tab mid-transaction.
+- No guarantee of a particular throughput improvement or unlimited public-node rate capacity. Testnet actual Batch writes and gallery replay still require real device-level evidence.
 
 ## Customer flow — Upload → Pay & Mint → My Gallery (v0.3)
 This is a **real transaction implementation**, not a simulation. Keep the page foregrounded; it operates in the user's browser, not as a server-side background job.
