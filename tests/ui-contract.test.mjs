@@ -21,5 +21,7 @@ test("automated pipeline is still Testnet/Devnet only and does not charge a 2 XR
   assert.ok(!main.includes("wss://xrplcluster.com"),"Do not silently add Mainnet");
   assert.ok(!main.includes("Destination:"),"No platform payment destination is permitted in this phase");
   assert.match(main,/SERVICE_FEE_DROPS/);
+  assert.match(main,/XRPMan-Disposable-Test-Wallet/,"local signer only accepts tagged disposable test backups");
+  assert.match(main,/data\.network!==currentNetwork\(\)/,"wallet backup must match selected non-mainnet network");
   assert.match(main,/No mainnet|mainnet disabled|mainnet/i,"Mainnet lock should remain present");
 });
