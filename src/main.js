@@ -128,6 +128,8 @@ function displayReceipt(){
      : receipt.confirmed.length===m.totalChunks?"All chunks validated. You can mint the archive NFT."
      : receipt.confirmed.length+" / "+m.totalChunks+" verified chunks. Resume as needed.");
   syncControls();
+  // Read-only mirror; do not call when a user navigates between cards.
+  if(typeof renderLiveUploadStatus==="function")renderLiveUploadStatus();
 }
 function exportJson(obj, name){
   const url=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:"application/json"}));
@@ -751,6 +753,27 @@ function renderLiveUploadStatus(){
   }else{
     region.textContent="Live monitor ready · connect your self-custody test wallet to begin.";
   }
+  // This mirror stays outside the card stack; navigating Home or Gallery never
+  // removes the progress indicator or the active in-memory signing session.
+  const strip=$("persistentUploadStrip"),home=$("homeUploadSummary");
+  if(strip) {
+    strip.hidden=!receipt;
+    if(receipt) {
+      const bar=$("persistentUploadProgress"),label=$("persistentUploadLabel");
+      bar.max=Math.max(total,1);
+      bar.value=chunks;
+      const percent=total>0?Math.floor(chunks/total*100):0;
+      label.textContent=receipt.nftHash?"Minted ✓":receipt.pending?"Checking signed transaction":
+        autoUploadRunning?"Uploading "+percent+"%":chunks>0?"Saved "+percent+"% · resume ready":"Prepared · ready to mint";
+    }
+  }
+  if(home) {
+    home.textContent=autoUploadRunning ? region.textContent :
+      receipt?.nftHash?"Your NFT has been minted on "+receipt.manifest.network.toUpperCase()+". Open My Gallery.":
+      receipt?.pending?"The last signed transaction needs verification before another submission.":
+      receipt?"Archive saved: "+chunks.toLocaleString()+" / "+total.toLocaleString()+" data chunks verified. Open Pay & Mint to continue.":
+      "No upload in progress. Connect your self-custody Testnet wallet to begin.";
+  }
 }
 function uploadPhase(stage,details={}){
   currentUploadPhase=stage;
@@ -882,6 +905,8 @@ async function startAutoMint(){
       trace("upload.complete",{archiveId:currentArchive,nftHash:receipt.nftHash,outerSent:result.sent});
       await rememberGalleryReceipt(true);
       refreshGallery({scanWallet:true}).catch(error=>trace("gallery.refresh.error",{message:safeText(error)},"warn"));
+      // Changing cards is UI-only; the verified archive and wallet stay mounted.
+      window.__xrpmanFlowGo?.("gallery");
       $("gallerySection").scrollIntoView({behavior:"smooth",block:"start"});
     }else{
       const why=result.state==="limit"?"The maximum batch limit was reached.":"Upload paused to protect your wallet.";
