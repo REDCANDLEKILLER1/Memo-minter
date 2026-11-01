@@ -42,19 +42,42 @@ export function createDiagnosticStore(storage=null, now=()=>new Date().toISOStri
       }));
   }catch {}
   const listeners=new Set();
+  let dirty=false,flushTimer=null;
+  let errors=events.reduce((count,e)=>count+(e.level==="error"?1:0),0);
   const notify=()=>{for(const fn of listeners){try{fn()}catch{}}};
-  const persist=()=>{try{storage?.setItem(KEY,JSON.stringify({version:1,events}))}catch{}};
+  const flush=()=>{
+    if(flushTimer!==null){clearTimeout(flushTimer);flushTimer=null}
+    if(!dirty)return;
+    try{
+      storage?.setItem(KEY,JSON.stringify({version:1,events}));
+      dirty=false;
+    }catch{} // never block upload due to diagnostics storage quotas
+  };
+  const schedulePersist=(urgent=false)=>{
+    dirty=true;
+    if(urgent){flush();return}
+    // Uploads can produce thousands of events; don't synchronously write the
+    // entire 350-entry history back to localStorage on every transaction.
+    if(flushTimer===null)flushTimer=setTimeout(flush,750);
+  };
   return {
     add(level,stage,details={}) {
       const item={time:now(),level:scrubText(level),stage:scrubText(stage),details:scrubDetails(details)};
       events.push(item);
-      if(events.length>LIMIT)events=events.slice(-LIMIT);
-      persist();notify();
+      if(item.level==="error")errors++;
+      if(events.length>LIMIT){
+        const dropped=events.shift();
+        if(dropped.level==="error")errors--;
+      }
+      schedulePersist(item.level==="error");
+      notify();
       return item;
     },
     list(){return events.map(e=>({time:e.time,level:e.level,stage:e.stage,details:scrubDetails(e.details)}))},
-    report(){return {app:"XRPMan Memo Minter",version:"0.2.2-debug",exportedAt:now(),network:"LOCAL_DIAGNOSTICS_ONLY",events:this.list()}},
-    clear(){events=[];persist();notify()},
+    summary(){return {total:events.length,errors,last:events.at(-1)||null}},
+    report(){flush();return {app:"XRPMan Memo Minter",version:"0.3.1-debug",exportedAt:now(),network:"LOCAL_DIAGNOSTICS_ONLY",events:this.list()}},
+    flush,
+    clear(){events=[];errors=0;schedulePersist(true);notify()},
     subscribe(fn){listeners.add(fn);return ()=>listeners.delete(fn)}
   };
 }
@@ -66,13 +89,15 @@ export function mountLadybug(store, doc=document, globalWindow=window) {
   const last=doc.getElementById("debugLast");
   if(!toggle || !panel || !items || !count || !last) return;
   const render=()=>{
-    const events=store.list();
-    const errors=events.filter(e=>e.level==="error").length;
+    const overview=store.summary();
+    const errors=overview.errors;
     count.textContent=errors ? String(Math.min(errors,99)) : "";
     count.hidden=!errors;
-    const e=events.at(-1);
+    const e=overview.last;
     last.textContent=e ? "Latest: "+e.stage+" · "+e.level : "Nothing logged yet.";
     if(panel.hidden)return;
+    // Don't clone and stringify every event while the debug drawer is closed.
+    const events=store.list();
     items.replaceChildren();
     for(const item of events.slice(-80).reverse()) {
       const line=doc.createElement("div");
@@ -109,9 +134,15 @@ export function mountLadybug(store, doc=document, globalWindow=window) {
   doc.getElementById("debugClear").addEventListener("click",()=>{
     if(globalWindow.confirm("Clear the local diagnostic history?"))store.clear();
   });
-  store.subscribe(render);render();
+  let scheduled=null;
+  const scheduleRender=()=>{
+    if(scheduled!==null)return;
+    scheduled=globalWindow.setTimeout(()=>{scheduled=null;render()},120);
+  };
+  store.subscribe(scheduleRender);render();
 }
 export function installGlobalDiagnostics(store, win=window, doc=document) {
+  win.addEventListener("pagehide",()=>store.flush());
   // Capture console warnings/errors, but never serialize arbitrary objects:
   // SDK objects and responses could contain secret-bearing fields.
   const logger=win.console;
