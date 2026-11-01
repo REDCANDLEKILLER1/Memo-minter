@@ -573,6 +573,273 @@ async function readLedger(){
   }catch(e){trace("read.error",{message:safeText(e)},"error");$("readStatus").textContent="VERIFY FAILED / INCOMPLETE: "+safeText(e)}
   finally{setBusy(false)}
 }
+
+const formatDrops = drops => (Number(drops)/1000000).toFixed(6)+" TEST XRP";
+async function updateQuote() {
+  if(!receipt) {
+    $("quotePrice").textContent="Upload a file to calculate the price.";
+    $("quoteDetails").textContent="Service charge: 0 Test XRP during testing. Future 2 XRP fee not active.";
+    estimatedFeeDrops=null;
+    return;
+  }
+  const plan=uploadPlan(receipt.manifest.totalChunks,receipt.confirmed.length);
+  let networkBase=10,approx=true;
+  if(client?.isConnected()){
+    try{
+      const fee=await client.request({command:"fee"});
+      const drops=Number(fee.result?.drops?.open_ledger_fee || fee.result?.drops?.base_fee);
+      if(Number.isSafeInteger(drops)&&drops>=10&&drops<=100000){networkBase=drops;approx=false;}
+    }catch(error){trace("fee.quote.unavailable",{message:safeText(error)},"warn")}
+  }
+  estimatedFeeDrops=estimateFeeDrops(plan,networkBase);
+  $("quotePrice").textContent=plan.outerTransactions+" automatic submission"+(plan.outerTransactions===1?"":"s")+
+    " + 1 NFT · estimated network fee "+formatDrops(estimatedFeeDrops);
+  $("quoteDetails").textContent=(approx?"Approximate estimate (fee node unavailable). ":"Estimated using current network fees. ")+
+    "Platform charge: "+formatDrops(SERVICE_FEE_DROPS)+
+    ". Maximum authorized fee budget confirmed before signing; Mainnet disabled.";
+  trace("fee.quote",{chunks:plan.remaining,outer:plan.outerTransactions,baseFeeDrops:networkBase,
+    estimateDrops:String(estimatedFeeDrops),approx});
+}
+async function mintApproved(){
+  if(receipt?.pending)throw new Error("Cannot mint with unresolved transaction");
+  if(receipt?.nftHash)return;
+  if(receipt?.confirmed.length!==receipt?.manifest.totalChunks)throw new Error("File is not fully verified yet");
+  const m=receipt.manifest;
+  const manifestBytes=new TextEncoder().encode(JSON.stringify(m));
+  if(manifestBytes.length>850)throw new Error("Manifest is too large");
+  const nftTx={
+    TransactionType:"NFTokenMint",Account:wallet.address,Flags:8,NFTokenTaxon:0,
+    URI:textHex("xrpman://v1/"+m.sha256),
+    Memos:[{Memo:{MemoType:textHex(MANIFEST_MEMO_TYPE),MemoData:toHex(manifestBytes)}}]
+  };
+  trace("upload.mint.start",{archiveId:m.sha256});
+  await signAndCommit(nftTx,"mint",[]);
+  await rememberGalleryReceipt(true);
+  trace("upload.mint.success",{hash:receipt.nftHash});
+}
+async function startAutoMint(){
+  if(busy || autoUploadRunning) return;
+  assertConnected();
+  if(!wallet||!walletFunded||!receipt||!rawBytes)throw new Error("Connect a funded Test Wallet and select a file first");
+  if(receipt.wallet!==wallet.address || receipt.manifest.network!==currentNetwork())
+    throw new Error("Uploaded file and wallet/network do not match");
+  if(receipt.pending)throw new Error("A signed transaction is unresolved. Use Advanced → Resolve first.");
+  if(receipt.nftHash)throw new Error("This archive already has a confirmed NFT mint");
+  const expected=await updateQuote();
+  const plan=uploadPlan(receipt.manifest.totalChunks,receipt.confirmed.length);
+  if(plan.outerTransactions>1500)throw new Error("Upload exceeds the bounded automatic transaction limit");
+  const estimate=estimatedFeeDrops||estimateFeeDrops(plan,10);
+  const proposed=estimate*5n>100000n?estimate*5n:100000n;
+  const maximum=proposed>1000000n?1000000n:proposed;
+  if(estimate>maximum)throw new Error("Network fees exceed the 1 Test XRP session cap. Upload blocked.");
+  const approval="Pay & Mint on XRPL "+currentNetwork().toUpperCase()+"?\n\n"+
+    "File: "+receipt.manifest.filename+"\n"+
+    "Remaining batches / outer submissions: "+plan.outerTransactions+"\n"+
+    "Estimated network fee including NFT: "+formatDrops(estimate)+"\n"+
+    "Maximum fee authorized for this run: "+formatDrops(maximum)+"\n"+
+    "Platform charge: 0 Test XRP (the future 2 XRP fee is NOT enabled)\n\n"+
+    "Your file is permanently public on this test ledger. The app runs sequentially while this tab stays open. "+
+    "It pauses when hidden or offline and stops on any unresolved signed transaction.\n\n"+
+    "Approve this complete upload and NFT mint?";
+  if(!confirm(approval)){
+    trace("upload.approval.declined",{chunks:plan.remaining});
+    $("autoStatus").textContent="Nothing submitted. Your file remains prepared.";
+    return;
+  }
+  activeAuthorization={maxDrops:maximum,committedDrops:0n,archiveId:receipt.manifest.archiveId};
+  pauseUploadRequested=false;
+  autoUploadRunning=true;
+  setBusy(true);
+  $("autoMint").textContent="Uploading & verifying…";
+  $("autoStatus").textContent="Starting automatically. Keep this tab open. You can pause after the current batch.";
+  $("uploadProgress").hidden=false;
+  $("uploadProgress").max=receipt.manifest.totalChunks;
+  $("uploadProgress").value=receipt.confirmed.length;
+  trace("upload.started",{archiveId:receipt.manifest.archiveId,remaining:plan.remaining,
+    estimatedFeeDrops:String(estimate),maxApprovedFeeDrops:String(maximum)});
+  const currentArchive=receipt.manifest.archiveId;
+  try{
+    const result=await runAutoUpload({
+      getRemaining:()=>nextIndices(),
+      maxOuter:1500,
+      shouldPause:()=>pauseUploadRequested || document.visibilityState==="hidden" ||
+        !navigator.onLine || !client?.isConnected(),
+      submitChunkGroup:async(indices)=>{
+        if(!activeAuthorization||activeAuthorization.archiveId!==currentArchive)throw new Error("Upload authorization changed");
+        if(receipt.pending)throw new Error("Previous signed hash unresolved; upload stopped");
+        const batch=indices.length>=2;
+        const innerTransactions=indices.map(i=>({
+          TransactionType:"AccountSet",Account:wallet.address,
+          ...(batch?{Flags:tfInnerBatchTxn}:{}),
+          Memos:memoForChunk(i)
+        }));
+        const transaction=batch?{
+          TransactionType:"Batch",Account:wallet.address,Flags:tfAllOrNothing,
+          RawTransactions:innerTransactions.map(RawTransaction=>({RawTransaction}))
+        }:innerTransactions[0];
+        $("autoStatus").textContent="Uploading · "+receipt.confirmed.length.toLocaleString()+
+          " / "+receipt.manifest.totalChunks.toLocaleString()+" pieces verified…";
+        await signAndCommit(transaction,batch?"batch":"single",indices);
+      },
+      mint:async()=>{
+        $("autoStatus").textContent="Every data chunk verified. Minting the NFT now…";
+        await mintApproved();
+      },
+      onProgress:({sent,remaining})=>{
+        $("uploadProgress").value=receipt.confirmed.length;
+        $("autoStatus").textContent="Saving to XRPL · "+receipt.confirmed.length.toLocaleString()+
+          " / "+receipt.manifest.totalChunks.toLocaleString()+" chunks verified"+
+          " · "+remaining.toLocaleString()+" remaining.";
+        if(sent%10===0||remaining===0)trace("upload.progress",{outerSubmitted:sent,confirmed:receipt.confirmed.length,remaining});
+      },
+      yieldControl:()=>new Promise(resolve=>setTimeout(resolve,0))
+    });
+    if(result.state==="complete"){
+      $("autoStatus").textContent="Mint complete! Your file is verified on XRPL. Find it in My Gallery below.";
+      trace("upload.complete",{archiveId:currentArchive,nftHash:receipt.nftHash,outerSent:result.sent});
+      await rememberGalleryReceipt(true);
+      refreshGallery({scanWallet:true}).catch(error=>trace("gallery.refresh.error",{message:safeText(error)},"warn"));
+      $("gallerySection").scrollIntoView({behavior:"smooth",block:"start"});
+    }else{
+      const why=result.state==="limit"?"The maximum batch limit was reached.":"Upload paused to protect your wallet.";
+      $("autoStatus").textContent=why+" "+result.remaining+" chunks remain. Tap Pay & Mint to resume with a new fee approval.";
+      trace("upload.paused",{state:result.state,remaining:result.remaining,outerSent:result.sent},"warn");
+    }
+  }catch(error){
+    const pending=!!receipt?.pending;
+    $("autoStatus").textContent="Upload stopped: "+safeText(error)+
+      (pending?"\nA signed transaction is unresolved. Do not restart until it has been verified.":"\nYour verified progress is saved; you can resume safely.");
+    trace("upload.stopped",{message:safeText(error),pending,confirmed:receipt?.confirmed?.length||0},"error");
+  }finally{
+    activeAuthorization=null;
+    autoUploadRunning=false;
+    $("autoMint").textContent=receipt?.nftHash?"Minted ✓":"Pay & Mint";
+    setBusy(false);displayReceipt();
+    updateQuote().catch(()=>{});
+    await refreshBalance().catch(()=>{});
+    rememberGalleryReceipt(true).catch(()=>{});
+  }
+}
+function mediaIcon(mime) {
+  if(mime?.startsWith("image/"))return "🖼️";
+  if(mime?.startsWith("audio/"))return "♫";
+  if(mime?.startsWith("video/"))return "▶";
+  if(mime==="application/pdf")return "▣";
+  return "▤";
+}
+async function queryOwnedVaultNfts(){
+  if(!wallet||!client?.isConnected())return [];
+  const found=[];let marker=null,pages=0;
+  do{
+    const request={command:"account_nfts",account:wallet.address,ledger_index:"validated",limit:200};
+    if(marker)request.marker=marker;
+    const response=await client.request(request);
+    for(const nft of response.result?.account_nfts||[]) {
+      const archiveId=extractVaultArchiveId(nft);
+      if(archiveId)found.push({archiveId,network:currentNetwork(),nftId:nft.NFTokenID,
+        issuer:nft.Issuer,holder:wallet.address});
+    }
+    marker=response.result?.marker||null;
+    pages++;
+  }while(marker&&pages<15);
+  if(marker)trace("gallery.nft.scan.partial",{pages}, "warn");
+  return found;
+}
+async function refreshGallery({scanWallet=true}={}){
+  const request=++galleryRefreshCount;
+  let saved=[];
+  try{saved=await listGalleryReceipts()}
+  catch(error){
+    trace("gallery.storage.error",{message:safeText(error)},"warn");
+    $("galleryStatus").textContent="Local gallery storage unavailable. Download the upload receipt for backup.";
+  }
+  if(receipt){
+    try{
+      const meta=summarizeReceipt(receipt);
+      saved=saved.filter(x=>x.meta.id!==meta.id);
+      saved.unshift({receipt:structuredClone(receipt),meta,updatedAt:new Date().toISOString()});
+    }catch(error){trace("gallery.checkpoint.invalid",{message:safeText(error)},"warn")}
+  }
+  let held=[];
+  if(scanWallet && wallet && client?.isConnected()){
+    try{held=await queryOwnedVaultNfts()}
+    catch(error){trace("gallery.nft.scan.error",{message:safeText(error)},"warn")}
+  }
+  if(request!==galleryRefreshCount)return;
+  const ownedByArchive=new Map(held.map(x=>[x.archiveId,x]));
+  const items=new Map();
+  for(const entry of saved){
+    const chain=ownedByArchive.get(entry.meta.archiveId);
+    items.set(entry.meta.id,{...entry,chain});
+  }
+  for(const nft of held){
+    const key=nft.network+"::"+nft.archiveId;
+    if(![...items.values()].some(e=>e.meta.archiveId===nft.archiveId && e.meta.network===nft.network)){
+      items.set(key,{meta:{id:key,archiveId:nft.archiveId,network:nft.network,
+        filename:"NFT "+nft.nftId.slice(0,12)+"…",mime:"",size:null,confirmed:0,totalChunks:null,
+        minted:true,nftHash:null,nftId:nft.nftId,wallet:nft.holder,pending:false},
+        receipt:null,chain:nft});
+    }
+  }
+  const list=[...items.values()];
+  const grid=$("galleryGrid");
+  grid.replaceChildren();
+  for(const item of list){
+    const m=item.meta,card=document.createElement("article");
+    card.className="gallery-item";
+    const icon=document.createElement("div");icon.className="gallery-icon";icon.textContent=mediaIcon(m.mime);
+    const name=document.createElement("div");name.className="gallery-title";name.textContent=m.filename;
+    const kind=document.createElement("div");kind.className="gallery-type";
+    kind.textContent=m.mime||"XRPL NFT · archive receipt needed";
+    const state=document.createElement("div");
+    const minted=!!m.nftHash || !!item.chain;
+    state.className=minted?"status-ready":"status-pending";
+    state.textContent=minted?"NFT minted ✓":m.pending?"Transaction awaiting verification":
+      m.confirmed===m.totalChunks?"Data stored · NFT pending":"Archive in progress";
+    const count=document.createElement("div");count.className="gallery-count";
+    count.textContent=m.totalChunks==null?"On-ledger NFT · file index unavailable":
+      m.confirmed+" / "+m.totalChunks+" data pieces verified";
+    card.append(icon,name,kind,state,count);
+    if(item.receipt && item.receipt.confirmed.length===m.totalChunks){
+      const view=document.createElement("button");view.type="button";view.textContent="View Media from XRPL";
+      view.addEventListener("click",async()=>{
+        try{
+          readerReceipt=item.receipt;
+          if(currentNetwork()!==m.network)throw new Error("Switch to "+m.network+" before reading this archive");
+          await connectNetwork();await readLedger();
+          $("galleryViewer").scrollIntoView({behavior:"smooth",block:"start"});
+        }catch(error){
+          $("readStatus").textContent="Unable to open: "+safeText(error);
+          trace("gallery.open.error",{message:safeText(error)},"error");
+        }
+      });
+      card.append(view);
+    }
+    if(item.receipt){
+      const download=document.createElement("button");download.type="button";
+      download.className="secondary";download.textContent="Save Archive Receipt";
+      download.addEventListener("click",()=>exportJson(item.receipt,"xrpman-receipt-"+m.archiveId.slice(0,16)+".json"));
+      card.append(download);
+    }
+    const nftId=item.chain?.nftId||m.nftId;
+    if(nftId){
+      const short=document.createElement("small");short.className="gallery-count";
+      short.textContent="NFTokenID: "+nftId.slice(0,16)+"…";
+      card.append(short);
+    }
+    if(!item.receipt){
+      const note=document.createElement("small");note.className="gallery-count";
+      note.textContent="Import the original archive receipt to reconstruct this NFT's media.";
+      card.append(note);
+    }
+    grid.append(card);
+  }
+  $("galleryStatus").textContent=list.length?list.length+" saved or wallet-owned archive"+(list.length===1?"":"s")+
+    " · files are verified from ledger transaction history when opened.":
+    "No archived media yet. Upload a file and mint it to add your first gallery item.";
+  trace("gallery.render",{items:list.length,walletNFTs:held.length});
+}
+
 function on(id,cb){
   $(id).addEventListener("click",async()=>{
     const started=performance.now();
