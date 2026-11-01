@@ -9,6 +9,7 @@ import { createDiagnosticStore, mountLadybug, installGlobalDiagnostics, scrubTex
 import { readFileWithProgress } from "./file-reader.js";
 import { uploadPlan, estimateFeeDrops, assertFeeBudget, runAutoUpload, SERVICE_FEE_DROPS } from "./autopilot.js";
 import { putGalleryReceipt, getGalleryReceipt, listGalleryReceipts, summarizeReceipt, extractVaultArchiveId } from "./gallery.js";
+import { lookupValidatedTx } from "./ledger-verify.js";
 
 const $ = id => document.getElementById(id);
 const SERVERS = Object.freeze({
@@ -364,18 +365,15 @@ function memoForChunk(index){
   const chunk=rawBytes.subarray(begin,Math.min(rawBytes.length,begin+CHUNK_BYTES));
   return [{Memo:{MemoType:textHex(MEMO_TYPE),MemoData:encodeChunk(chunk,receipt.manifest.sha256,index,receipt.manifest.totalChunks)}}];
 }
-function readTxJson(result){return result.tx_json || result.tx || result.transaction || result;}
 function resultCode(result){return typeof result.meta==="string"?result.meta:result.meta?.TransactionResult;}
 async function readValidated(hash,expectedType=null){
   trace("tx.lookup",{hash,expectedType});
-  const response=await client.request({command:"tx",transaction:hash});
-  const result=response.result||{};
-  if(result.validated!==true)throw new Error("Transaction not validated: "+hash);
-  const tx=readTxJson(result);
-  if(expectedType && tx.TransactionType!==expectedType)throw new Error("Unexpected transaction type at "+hash);
-  if(resultCode(result)!=="tesSUCCESS")throw new Error("Ledger result "+(resultCode(result)||"unknown")+" for "+hash);
-  trace("tx.validated",{hash,type:tx.TransactionType,ledgerIndex:result.ledger_index});
-  return {tx,result};
+  const out=await lookupValidatedTx(client,hash,expectedType,{
+    attempts:5,initialDelayMs:800,
+    onRetry:({attempt,reason})=>trace("tx.lookup.retry",{hash,attempt,reason},"warn")
+  });
+  trace("tx.validated",{hash,type:out.tx.TransactionType,ledgerIndex:out.result.ledger_index});
+  return out;
 }
 async function settlePending(){
   if(!receipt?.pending)return;
