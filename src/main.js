@@ -37,6 +37,23 @@ let client = null, wallet = null, rawBytes = null, receipt = null;
 let readerReceipt = null, busy = false, previewUrl = null, walletFunded = false;
 let autoUploadRunning = false, pauseUploadRequested = false, activeAuthorization = null;
 let estimatedFeeDrops = null, gallerySaving = Promise.resolve(), galleryRefreshCount = 0;
+let droppedMediaFile=null, localPreviewURL=null;
+function selectedMediaFile(){return droppedMediaFile || $("sourceFile").files[0] || null;}
+function showSelectedMediaPreview(file){
+  if(localPreviewURL){URL.revokeObjectURL(localPreviewURL);localPreviewURL=null}
+  const region=$("selectedPreview");
+  region.replaceChildren();
+  if(!file)return;
+  let media=null;
+  if(file.type?.startsWith("image/"))media=document.createElement("img");
+  else if(file.type?.startsWith("audio/")){media=document.createElement("audio");media.controls=true}
+  else if(file.type?.startsWith("video/")){media=document.createElement("video");media.controls=true}
+  if(!media)return;
+  localPreviewURL=URL.createObjectURL(file);
+  media.src=localPreviewURL;
+  media.alt="Selected media (local preview; not yet on XRPL)";
+  region.append(media);
+}
 
 function currentNetwork() { return $("network").value; }
 function syncControls() {
@@ -224,7 +241,7 @@ async function connectTestWallet() {
     // Never silently create a replacement wallet when faucet / network is unavailable.
   } finally {
     setBusy(false);
-    if(walletFunded && $("sourceFile").files[0] && !rawBytes) {
+    if(walletFunded && selectedMediaFile() && !rawBytes) {
       try{await prepareFile()}
       catch(error){trace("file.auto.prepare.error",{message:safeText(error)},"error")}
     }
@@ -276,7 +293,7 @@ async function prepareFile(){
     trace("prepare.blocked",{reason:"another operation active"},"warn");
     return;
   }
-  const file=$("sourceFile").files[0];
+  const file=selectedMediaFile();
   if(!file) {
     prepareUI("Select an image, song or other file before pressing Prepare.",{error:true});
     throw new Error("No file selected");
@@ -864,19 +881,41 @@ function on(id,cb){
     }finally{syncControls()}
   });
 }
-$("sourceFile").addEventListener("change",async()=>{
-  const f=$("sourceFile").files[0];
-  if(!f){prepareUI("Select a file, then press Prepare file.");return}
+async function handleMediaSelection(file){
+  if(busy) {
+    prepareUI("Finish or pause the current upload before selecting another file.",{error:true});
+    trace("file.selection.blocked",{reason:"upload active"},"warn");
+    return;
+  }
   rawBytes=null;syncControls();
-  prepareUI("Selected "+f.name+" · "+f.size.toLocaleString()+" bytes. Preparing automatically…");
-  trace("file.selected",{sizeBytes:f.size,mediaType:f.type?.split("/")[0]||"unknown"});
+  showSelectedMediaPreview(file);
+  if(!file){prepareUI("Choose your media to mint.");return}
+  prepareUI("Selected "+file.name+" · "+file.size.toLocaleString()+" bytes. Preparing automatically…");
+  trace("file.selected",{sizeBytes:file.size,mediaType:file.type?.split("/")[0]||"unknown"});
   if(!wallet || !walletFunded){
-    prepareUI("File selected. Press Connect Test Wallet; preparation starts automatically.");
+    prepareUI("Media selected. Press Connect Test Wallet; preparation starts automatically.");
     return;
   }
   try {await prepareFile()}
   catch(error){trace("file.auto.prepare.error",{message:safeText(error)},"error")}
+}
+$("sourceFile").addEventListener("change",async()=>{
+  droppedMediaFile=null;
+  await handleMediaSelection(selectedMediaFile());
 });
+const dropArea=document.querySelector(".drop-media");
+if(dropArea){
+  dropArea.addEventListener("dragover",event=>{event.preventDefault();dropArea.classList.add("dragging")});
+  dropArea.addEventListener("dragleave",()=>dropArea.classList.remove("dragging"));
+  dropArea.addEventListener("drop",async event=>{
+    event.preventDefault();dropArea.classList.remove("dragging");
+    const file=event.dataTransfer?.files?.[0];
+    if(!file)return;
+    droppedMediaFile=file;
+    $("sourceFile").value="";
+    await handleMediaSelection(file);
+  });
+}
 on("connect",connectTestWallet);on("importWallet",importWallet);on("forgetWallet",()=>forgetWallet());
 on("backupWallet",()=>walletBackup());
 on("prepare",prepareFile);on("autoMint",startAutoMint);on("refreshGallery",()=>refreshGallery());
@@ -890,7 +929,7 @@ on("mint",mintNFT);on("loadReceipt",readReceiptFile);on("readLedger",readLedger)
 on("export",()=>{if(receipt)exportJson(receipt,"xrpman-receipt-"+receipt.manifest.sha256.slice(0,16)+".json")});
 on("clearCheckpoint",()=>{
   if(!confirm("Discard this browser's saved upload checkpoint? Export its receipt first. This does NOT delete ledger transactions."))return;
-  localStorage.removeItem(CHECKPOINT_KEY);receipt=null;rawBytes=null;$("sourceFile").value="";
+  localStorage.removeItem(CHECKPOINT_KEY);receipt=null;rawBytes=null;droppedMediaFile=null;$("sourceFile").value="";showSelectedMediaPreview(null);
   $("fileName").textContent="—";$("doneCount").textContent="0";$("progress").value=0;
   txLog("Local checkpoint discarded; ledger data remains public.");
   prepareUI("Checkpoint discarded. Select a file and press Prepare.");
