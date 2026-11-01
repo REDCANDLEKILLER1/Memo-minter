@@ -7,6 +7,8 @@ import {
 import { assertTestNetwork, fundAndVerifyTestWallet, readValidatedDrops } from "./test-wallet.js";
 import { createDiagnosticStore, mountLadybug, installGlobalDiagnostics, scrubText } from "./diagnostics.js";
 import { readFileWithProgress } from "./file-reader.js";
+import { uploadPlan, estimateFeeDrops, assertFeeBudget, runAutoUpload, SERVICE_FEE_DROPS } from "./autopilot.js";
+import { putGalleryReceipt, getGalleryReceipt, listGalleryReceipts, summarizeReceipt, extractVaultArchiveId } from "./gallery.js";
 
 const $ = id => document.getElementById(id);
 const SERVERS = Object.freeze({
@@ -32,6 +34,8 @@ const checked = () => { if (!$("consent").checked) throw new Error("Confirm the 
 const safeText = err => scrubText(err instanceof Error ? err.message : String(err));
 let client = null, wallet = null, rawBytes = null, receipt = null;
 let readerReceipt = null, busy = false, previewUrl = null, walletFunded = false;
+let autoUploadRunning = false, pauseUploadRequested = false, activeAuthorization = null;
+let estimatedFeeDrops = null, gallerySaving = Promise.resolve(), galleryRefreshCount = 0;
 
 function currentNetwork() { return $("network").value; }
 function syncControls() {
@@ -51,11 +55,32 @@ function syncControls() {
   $("importWallet").disabled = busy;
   $("forgetWallet").disabled = busy;
   $("readLedger").disabled = busy;
+  $("autoMint").disabled = busy || !wallet || !walletFunded || !rawBytes || !receipt ||
+    receipt.wallet!==wallet.address || receipt.manifest.network!==currentNetwork() ||
+    !!receipt.pending || !!receipt.nftHash;
+  $("refreshGallery").disabled = busy;
+  $("pauseAuto").hidden = !autoUploadRunning;
 }
 function setBusy(value) { busy = value; syncControls(); }
 function saveReceipt() {
-  if (receipt) localStorage.setItem(CHECKPOINT_KEY,JSON.stringify(receipt));
+  if (receipt) {
+    try { localStorage.setItem(CHECKPOINT_KEY,JSON.stringify(receipt)) }
+    catch(error) {
+      trace("checkpoint.save.error",{message:safeText(error)},"error");
+      throw new Error("Cannot save checkpoint. Download a receipt or clear browser storage before uploading.");
+    }
+  }
   syncControls();
+}
+function rememberGalleryReceipt(force=false) {
+  if(!receipt)return gallerySaving;
+  if(!force && receipt.confirmed.length%80!==0 && !receipt.nftHash)return gallerySaving;
+  const snapshot=structuredClone(receipt);
+  gallerySaving=gallerySaving.catch(()=>{}).then(()=>putGalleryReceipt(snapshot)).catch(error=>{
+    trace("gallery.save.error",{message:safeText(error)},"error");
+    $("galleryStatus").textContent="Gallery storage unavailable; use Download Archive Receipt for backup.";
+  });
+  return gallerySaving;
 }
 function displayReceipt(){
   if (!receipt) return;
@@ -309,12 +334,14 @@ async function prepareFile(){
     rawBytes=loadedBytes; // do not overwrite previously active file until the receipt is accepted
     saveReceipt();
     displayReceipt();
+    rememberGalleryReceipt(true).then(()=>refreshGallery({scanWallet:false})).catch(()=>{});
     const batches=Math.ceil(manifest.totalChunks/8);
     prepareUI("✓ Prepared successfully: "+manifest.totalChunks.toLocaleString()+
       " memo chunks · about "+batches.toLocaleString()+
       " batches. No transactions submitted yet. Continue to Section 03.",{ready:true});
     trace("prepare.success",{chunks:manifest.totalChunks,batches,hash,elapsedMs:Math.round(performance.now()-started)});
     txLog("File prepared locally: "+manifest.totalChunks+" chunks, "+batches+" estimated batches. Zero ledger writes.");
+    updateQuote().catch(error=>trace("quote.error",{message:safeText(error)},"warn"));
   }catch(error){
     prepareUI("Preparation failed: "+safeText(error)+". Tap the ladybug to export the diagnostic log.",{error:true});
     trace("prepare.error",{message:safeText(error),elapsedMs:Math.round(performance.now()-started)},"error");
@@ -380,6 +407,8 @@ async function settlePending(){
   receipt.outerTransactions.push({kind:p.kind,hash:p.hash,entries:p.entries.map(e=>e.hash)});
   receipt.pending=null;
   saveReceipt();displayReceipt();
+  rememberGalleryReceipt(p.kind==="mint" || receipt.confirmed.length===receipt.manifest.totalChunks)
+    .then(()=>refreshGallery({scanWallet:p.kind==="mint"})).catch(()=>{});
   txLog("LEDGER VALIDATED "+p.kind.toUpperCase()+" "+p.hash+" ("+p.entries.length+" chunks)");
   trace("tx.reconcile.success",{kind:p.kind,hash:p.hash,entries:p.entries.length});
 }
@@ -399,13 +428,23 @@ async function signAndCommit(tx,kind,indices){
     prepared=await client.autofill(tx);
   }
   if(prepared.Account!==wallet.address)throw new Error("Signer account mismatch");
+  if(receipt.pending)throw new Error("An earlier signed transaction remains unresolved — cannot sign a replacement");
   if(!Number.isSafeInteger(Number(prepared.Fee)) || Number(prepared.Fee)<1 || Number(prepared.Fee)>MAX_FEE_DROPS)
     throw new Error("Network fee exceeds the hard cap of 0.2 XRP; submission blocked");
+  if(activeAuthorization){
+    assertFeeBudget({feeDrops:prepared.Fee,committedDrops:activeAuthorization.committedDrops,
+      approvedMaxDrops:activeAuthorization.maxDrops});
+  }
   if(!Number.isSafeInteger(prepared.LastLedgerSequence))
     throw new Error("No validated LastLedgerSequence; submission blocked");
   xrpl.validate(prepared);
   const signed=wallet.sign(prepared);
   if(!/^[A-F0-9]{64}$/i.test(signed.hash))throw new Error("Signing failed to produce transaction hash");
+  if(activeAuthorization){
+    activeAuthorization.committedDrops+=BigInt(prepared.Fee);
+    trace("upload.fee.reserved",{feeDrops:String(prepared.Fee),
+      committedDrops:String(activeAuthorization.committedDrops),maxDrops:String(activeAuthorization.maxDrops)});
+  }
   const entries=(kind==="batch"
     ?prepared.RawTransactions.map((x,i)=>({index:indices[i],hash:xrpl.hashes.hashSignedTx(x.RawTransaction)}))
     :kind==="single"?[{index:indices[0],hash:signed.hash}]:[]);
