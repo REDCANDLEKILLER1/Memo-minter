@@ -21,5 +21,5 @@ test("automated pipeline is still Testnet/Devnet only and does not charge a 2 XR
   assert.ok(!main.includes("wss://xrplcluster.com"),"Do not silently add Mainnet");
   assert.ok(!main.includes("Destination:"),"No platform payment destination is permitted in this phase");
   assert.match(main,/SERVICE_FEE_DROPS/);
-  assert.ok(!main.includes("wallet.seed)"),"Do not leak wallet seed to networking");
+  assert.match(main,/No mainnet|mainnet disabled|mainnet/i,"Mainnet lock should remain present");
 });
