@@ -1,8 +1,18 @@
-# XRPMan Memo Minter — v0.3.2 TESTNET HOTFIX
+# XRPMan Memo Minter — v0.3.3 GUIDED CARDS (TESTNET)
 
 **STATUS: DEVELOPMENT BRANCH / UNVERIFIED LIVE XRPL TRANSACTIONS. MAINNET DISABLED.**
 
 Experimental browser app for writing actual binary data to XRPL transaction memos, retrieving chunks from **validated ledger transaction hashes**, and minting an archive NFT. Supports pictures, songs, video, PDFs and arbitrary bytes (up to 5 MiB in this version). Every byte of the original file is reconstructed and verified against SHA-256.
+
+## v0.3.3 — Guided card UI and hamburger tools (Nov 1, 2026)
+- Main interface is now **Home → Connect Wallet → Upload Media → Pay & Mint → My Gallery**. Exactly one card is visible at a time. The fixed lower bar provides **Home, Back, Next**; the Home card also contains **Start Minting** and **My Gallery**.
+- Hamburger **Menu** provides Home, Gallery, **🐞 Debug & Logs**, and **Transaction History**. The floating ladybug remains an emergency shortcut. The independent debug bootstrap is unchanged, and debug logs continue working from any card.
+- Card navigation is a separate same-origin script `/flow-nav.js`, independent of the XRPL transaction module. It only toggles `hidden` / accessibility labels on already-mounted sections; it never disconnects WebSockets, changes wallet state, discards the file, changes pending receipts, pauses signing, or resubmits transactions. Switching cards while an authorized upload is active is UI-only; leaving or closing the *browser tab* is still a distinct foreground/suspension event.
+- A compact **upload progress strip** stays outside the cards. It mirrors the active Testnet upload and has a `View Upload` action to return to Pay & Mint. On successful validated NFTokenMint, UI navigates to My Gallery.
+- Transaction receipts are stored in a menu-accessible overlay instead of a fifth scrolling page section; advanced wallet controls remain inside their respective cards.
+- Separate tests verify Next/Back/Home, hamburger debug and receipts, keeping in-memory state mounted, navigation to Gallery and presence of all step controls. Mainnet stays locked.
+- The **observed Testnet Batch fee underquote and remaining submit/validation throughput tuning** are tracked in [issue #2](https://github.com/REDCANDLEKILLER1/Memo-minter/issues/2), not silently dismissed. This UI-only PR update does not claim to have fixed the fee estimate. Do not enable Mainnet or the proposed 2 XRP platform charge before fee and signing audits pass.
+- **Verification boundary:** test/build/deployment can verify code and markup, but actual mobile navigation while an authorized Testnet upload continues still needs an Android device run; do not merge the draft until independently checked.
 
 ## v0.3.2 — Visible debugger, foreground auto-resume and local self-custody import
 - Added a **Debug & Logs** button in the normal page header in addition to the floating ladybug. A tiny, separate same-origin \`/debug-boot.js\` script runs **before** the main XRPL module; if the app bundle fails to load, the header/button still opens a fallback log. The app diagnostic module takes over the pane without installing duplicate click handlers. Debug health reports "Debug active"; no telemetry endpoint is used.
