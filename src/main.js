@@ -1147,10 +1147,13 @@ window.addEventListener("offline",()=>renderLiveUploadStatus());
 let periodicRefreshBusy=false;
 async function refreshStatusReadOnly(force=false){
   renderLiveUploadStatus();
-  trace("status.refresh.request",{manual:force,uploadActive:autoUploadRunning});
-  if(document.visibilityState!=="visible" || !navigator.onLine || periodicRefreshBusy)return;
-  if(autoUploadRunning || busy || !wallet || !client?.isConnected())return;
+  if(document.visibilityState!=="visible" || !navigator.onLine || periodicRefreshBusy ||
+      autoUploadRunning || busy || !wallet || !client?.isConnected()){
+    if(force)trace("status.refresh.skipped",{reason:"offline, busy, or no connected wallet"});
+    return;
+  }
   if(!force && Date.now()-lastBalanceRefresh<30000)return;
+  trace("status.refresh.request",{manual:force});
   lastBalanceRefresh=Date.now();
   periodicRefreshBusy=true;
   try{
