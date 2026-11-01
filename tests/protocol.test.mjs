@@ -7,7 +7,7 @@ import {
 const enc=new TextEncoder();
 const sample=enc.encode("XRPMan on-ledger demo file content.");
 const FILE={name:"demo.txt",type:"text/plain",size:sample.byteLength};
-const wallet="r123456789ABCDEFGHJKLMNPQRSTUVWXYZab";
+const wallet="r123456789ABCDEFGHJKLMNPQRSTUVWX";
 test("hex roundtrip + invalid input",()=>{
   assert.deepEqual(fromHex(toHex(sample)),sample);
   assert.throws(()=>fromHex("ABC"),/Malformed/);
