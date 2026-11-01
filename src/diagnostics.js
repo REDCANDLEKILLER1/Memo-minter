@@ -112,6 +112,24 @@ export function mountLadybug(store, doc=document, globalWindow=window) {
   store.subscribe(render);render();
 }
 export function installGlobalDiagnostics(store, win=window, doc=document) {
+  // Capture console warnings/errors, but never serialize arbitrary objects:
+  // SDK objects and responses could contain secret-bearing fields.
+  const logger=win.console;
+  if(logger)for(const method of ["warn","error"]){
+    const original=typeof logger[method]==="function" ? logger[method].bind(logger) : null;
+    if(!original)continue;
+    logger[method]=(...args)=>{
+      try{
+        const message=args.slice(0,5).map(arg=>{
+          if(typeof arg==="string")return scrubText(arg);
+          if(arg instanceof Error)return scrubText(arg.message);
+          return "[non-text value omitted]";
+        }).join(" ").slice(0,MAX_FIELD);
+        store.add(method==="error"?"error":"warn","console."+method,{message});
+      }catch{}
+      return original(...args);
+    };
+  }
   win.addEventListener("error",event=>store.add("error","browser.error",{
     message:event.message,source:String(event.filename||"").split("/").pop(),
     line:event.lineno,column:event.colno
