@@ -10,6 +10,7 @@ import { readFileWithProgress } from "./file-reader.js";
 import { uploadPlan, estimateFeeDrops, assertFeeBudget, runAutoUpload, SERVICE_FEE_DROPS } from "./autopilot.js";
 import { putGalleryReceipt, getGalleryReceipt, listGalleryReceipts, summarizeReceipt, extractVaultArchiveId } from "./gallery.js";
 import { lookupValidatedTx } from "./ledger-verify.js";
+import { mapValidatedParallel, MAX_READ_CONCURRENCY } from "./parallel-verify.js";
 
 const $ = id => document.getElementById(id);
 const SERVERS = Object.freeze({
@@ -397,33 +398,45 @@ async function readValidated(hash,expectedType=null){
 async function settlePending(){
   if(!receipt?.pending)return;
   assertConnected();
+  const started=performance.now();
   const p=receipt.pending;
   trace("tx.reconcile.start",{kind:p.kind,hash:p.hash,entries:p.entries.length});
+  if(autoUploadRunning)$("autoStatus").textContent="Verifying ledger confirmation for "+p.kind+"…";
   const {tx}=await readValidated(p.hash,p.kind==="batch"?"Batch":p.kind==="mint"?"NFTokenMint":"AccountSet");
   if(tx.Account!==receipt.wallet)throw new Error("Validated account differs from receipt");
   if(p.kind==="batch" && (!Array.isArray(tx.RawTransactions)||tx.RawTransactions.length!==p.entries.length))
     throw new Error("Batch content differs from the signed receipt");
-  // An outer Batch tesSUCCESS does not prove any inner transaction succeeded.
-  for(const entry of p.entries){
-    const inner=await readValidated(entry.hash,"AccountSet");
-    if(inner.tx.Account!==receipt.wallet)throw new Error("Inner account mismatch");
-    const memo=inner.tx.Memos?.find(m=>m?.Memo?.MemoType===textHex(MEMO_TYPE));
-    if(!memo?.Memo?.MemoData)throw new Error("Expected data memo missing at "+entry.hash);
-    const data=decodeChunk(memo.Memo.MemoData,receipt.manifest.sha256,entry.index,receipt.manifest.totalChunks);
-    const length=Math.min(CHUNK_BYTES,receipt.manifest.size-entry.index*CHUNK_BYTES);
-    if(data.length!==length)throw new Error("Validated chunk size mismatch");
-    if(rawBytes){
-      const original=rawBytes.subarray(entry.index*CHUNK_BYTES,entry.index*CHUNK_BYTES+length);
-      if(toHex(data)!==toHex(original))throw new Error("Validated bytes do not match selected file");
+  // Read-only parallel queries, bounded to 3. Do not advance receipt until ALL
+  // inner transaction hashes are validated, even if the outer Batch says tesSUCCESS.
+  const validated = await mapValidatedParallel(
+    p.entries,
+    async(entry)=>{
+      const inner=await readValidated(entry.hash,"AccountSet");
+      if(inner.tx.Account!==receipt.wallet)throw new Error("Inner account mismatch");
+      const memo=inner.tx.Memos?.find(m=>m?.Memo?.MemoType===textHex(MEMO_TYPE));
+      if(!memo?.Memo?.MemoData)throw new Error("Expected data memo missing at "+entry.hash);
+      const data=decodeChunk(memo.Memo.MemoData,receipt.manifest.sha256,entry.index,receipt.manifest.totalChunks);
+      const length=Math.min(CHUNK_BYTES,receipt.manifest.size-entry.index*CHUNK_BYTES);
+      if(data.length!==length)throw new Error("Validated chunk size mismatch");
+      if(rawBytes){
+        const original=rawBytes.subarray(entry.index*CHUNK_BYTES,entry.index*CHUNK_BYTES+length);
+        if(toHex(data)!==toHex(original))throw new Error("Validated bytes do not match selected file");
+      }
+      return {index:entry.index,hash:entry.hash};
+    },
+    MAX_READ_CONCURRENCY,
+    ({completed,total})=>{
+      if(autoUploadRunning)$("autoStatus").textContent="Verifying "+p.kind+" data: "+completed+" / "+total+
+        " transaction"+(total===1?"":"s")+" confirmed…";
     }
-  }
+  );
   if(p.kind==="mint"){
     const expectedURI=textHex("xrpman://v1/"+receipt.manifest.sha256);
     if(tx.URI!==expectedURI)throw new Error("NFT anchor URI mismatch");
     receipt.nftHash=p.hash;
   }else{
     const complete=new Set(receipt.confirmed.map(e=>e.index));
-    for(const e of p.entries)if(!complete.has(e.index))receipt.confirmed.push(e);
+    for(const entry of validated)if(!complete.has(entry.index))receipt.confirmed.push(entry);
     receipt.confirmed.sort((a,b)=>a.index-b.index);
   }
   receipt.outerTransactions.push({kind:p.kind,hash:p.hash,entries:p.entries.map(e=>e.hash)});
@@ -431,8 +444,10 @@ async function settlePending(){
   saveReceipt();displayReceipt();
   rememberGalleryReceipt(p.kind==="mint" || receipt.confirmed.length===receipt.manifest.totalChunks)
     .then(()=>refreshGallery({scanWallet:p.kind==="mint"})).catch(()=>{});
+  const elapsedMs=Math.round(performance.now()-started);
   txLog("LEDGER VALIDATED "+p.kind.toUpperCase()+" "+p.hash+" ("+p.entries.length+" chunks)");
-  trace("tx.reconcile.success",{kind:p.kind,hash:p.hash,entries:p.entries.length});
+  trace("tx.reconcile.success",{kind:p.kind,hash:p.hash,entries:p.entries.length,
+    verificationMode:"parallel-read-only",readConcurrency:MAX_READ_CONCURRENCY,elapsedMs});
 }
 async function signAndCommit(tx,kind,indices){
   // Caller has already passed the explicit-gate and pending checks.
@@ -477,7 +492,10 @@ async function signAndCommit(tx,kind,indices){
   txLog("SIGNED "+kind+" "+signed.hash+" fee="+prepared.Fee+" drops. Submitting...");
   try{
     trace("tx.submit.start",{kind,hash:signed.hash});
+    const submitStarted=performance.now();
+    if(autoUploadRunning)$("autoStatus").textContent="Submitting ${kind} transaction; waiting for XRPL ledger validation…";
     const response=await client.submitAndWait(signed.tx_blob);
+    trace("tx.submit.timing",{kind,hash:signed.hash,elapsedMs:Math.round(performance.now()-submitStarted)});
     const r=response.result||{};
     trace("tx.submit.response",{kind,hash:signed.hash,validated:!!r.validated,result:resultCode(r)||"unknown"});
     if(r.validated && resultCode(r) && resultCode(r)!=="tesSUCCESS")
