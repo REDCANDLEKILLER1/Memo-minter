@@ -1,8 +1,24 @@
-# XRPMan Memo Minter — v0.2 TESTNET
+# XRPMan Memo Minter — v0.3 AUTOMATED TESTNET
 
 **STATUS: DEVELOPMENT BRANCH / UNVERIFIED LIVE XRPL TRANSACTIONS. MAINNET DISABLED.**
 
 Experimental browser app for writing actual binary data to XRPL transaction memos, retrieving chunks from **validated ledger transaction hashes**, and minting an archive NFT. Supports pictures, songs, video, PDFs and arbitrary bytes (up to 5 MiB in this version). Every byte of the original file is reconstructed and verified against SHA-256.
+
+## Customer flow — Upload → Pay & Mint → My Gallery (v0.3)
+This is a **real transaction implementation**, not a simulation. Keep the page foregrounded; it operates in the user's browser, not as a server-side background job.
+
+1. **Connect Test Wallet** — one-click local test-wallet creation and faucet funding verified from a validated XRPL ledger balance.
+2. **Upload media** — select or drag/drop an image, audio, video, PDF or other file. The app automatically reads and hashes it and creates the numbered archive manifest and transaction-sized chunks. It shows a local preview where supported. **Limit: 5 MiB**, explicitly indicated.
+3. **Pay & Mint** — a *single* approval shows file, remaining number of Batch/outer transactions, current network fee estimate, maximum allowed **per-session** fee budget (≤1 Test XRP), zero platform charge, and that media will be public. It runs up to 1,500 sequential outer transactions, using up to 8 data chunks per native Batch and only proceeding after independently validating each inner hash/AccountSet memo. It then signs NFTokenMint **only if all chunks verify**. It is never a blind fire-and-forget sender.
+4. **My Gallery** — displays locally indexed archive receipts across reloads using IndexedDB, and optionally matches XRPL NFTs currently held by the connected wallet via \`account_nfts\` + the \`xrpman://v1/SHA256\` NFT URI. Clicking a *complete* archive reads its confirmed memo hashes from ledger history and recomputes SHA-256 before presenting image/audio/video or a file download.
+
+**One-time user approval does not eliminate risk controls.** Network failure / uncertain signed hash, fee-budget exhaustion, loss of connectivity, hidden tab, or explicit Pause stop future signatures. Exact transaction-hash read-only lookup may retry; neither signing nor submitting the same transaction is automatically retried. Resume requires reopening the app with the same disposable test wallet and file, then authorizing remaining fees once. All verified upload receipts can be downloaded as nonsecret JSON.
+
+**Gallery portability caveat:** The NFT URI currently carries the archive SHA-256, **not** a complete on-ledger transaction index. A second device needs an exported archive receipt to reconstruct the media. A standalone on-ledger index from NFT ID alone is a separate future protocol phase. IndexedDB only contains public manifest/hashes, not the seed or media file bytes; local storage is not a guaranteed backup.
+
+**Pricing:** The prospective **2 XRP service fee is not active.** There is no fee recipient, platform payment, Mainnet signing, or automatic 2 XRP charge in this branch. Only Testnet/Devnet transaction fees are submitted on authorized clicks.
+
+**Release gate:** CI unit/simulation tests and client build are not a live XRPL Batch success. Independently verify a small Testnet file end-to-end (wallet / Batch inner transaction records / gallery readback / NFT ID) and interruption/recovery before merging and certainly before enabling Mainnet or platform payments.
 
 ## Ladybug diagnostics + local file preparation (v0.2.2)
 - A small **🐞** toggle is fixed at the lower-right of the screen. It opens a scrollable local diagnostic panel with timestamped browser errors, unhandled promise rejections, button operations, network/funding stages, file selected (only media kind + size), actual file-read percentage, SHA-256 hashing, upload checkpoints, signed/validated transaction **hashes**, receipt retrieval and failure outcomes.
