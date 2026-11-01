@@ -212,6 +212,7 @@ async function connectTestWallet() {
     txLog("VALIDATED "+selected+" balance for "+wallet.address+": "+funding.balanceDrops+" drops"+
       (funding.alreadyFunded?" (existing funded account)":" (faucet funded)"));
     info("Test wallet is funded. Choose a file and press Prepare file.");
+    refreshGallery().catch(error=>trace("gallery.refresh.error",{message:safeText(error)},"warn"));
     trace("wallet.funded",{balanceDrops:String(funding.balanceDrops),network:selected});
   } catch(error) {
     walletFunded=false;
@@ -222,6 +223,10 @@ async function connectTestWallet() {
     // Never silently create a replacement wallet when faucet / network is unavailable.
   } finally {
     setBusy(false);
+    if(walletFunded && $("sourceFile").files[0] && !rawBytes) {
+      try{await prepareFile()}
+      catch(error){trace("file.auto.prepare.error",{message:safeText(error)},"error")}
+    }
   }
 }
 async function importWallet(){
@@ -530,6 +535,8 @@ async function readReceiptFile(){
   if(f.size>1500000)throw new Error("Receipt JSON over 1.5MB not supported");
   const obj=JSON.parse(await f.text());validateReceipt(obj);
   readerReceipt=obj;
+  await putGalleryReceipt(obj);
+  refreshGallery({scanWallet:false}).catch(()=>{});
   $("readStatus").textContent="Loaded "+obj.manifest.filename+": "+obj.confirmed.length+"/"+obj.manifest.totalChunks+
     " data receipts · "+obj.manifest.network.toUpperCase()+" · "+obj.manifest.sha256;
 }
@@ -851,21 +858,36 @@ function on(id,cb){
       trace("ui.action.error",{action:id,message:safeText(e),elapsedMs:Math.round(performance.now()-started)},"error");
       txLog("ERROR "+safeText(e));
       info("ERROR: "+safeText(e));
+      if(id==="autoMint")$("autoStatus").textContent="Cannot start: "+safeText(e);
+      if(id==="refreshGallery")$("galleryStatus").textContent="Cannot refresh gallery: "+safeText(e);
       if(id==="prepare" && !$("prepareStatus").classList.contains("error"))
         prepareUI("Preparation failed: "+safeText(e),{error:true});
       if(id==="loadReceipt"||id==="readLedger")$("readStatus").textContent="ERROR: "+safeText(e);
     }finally{syncControls()}
   });
 }
-$("sourceFile").addEventListener("change",()=>{
+$("sourceFile").addEventListener("change",async()=>{
   const f=$("sourceFile").files[0];
   if(!f){prepareUI("Select a file, then press Prepare file.");return}
-  prepareUI("Selected "+f.name+" · "+f.size.toLocaleString()+" bytes. Press Prepare file.");
+  rawBytes=null;syncControls();
+  prepareUI("Selected "+f.name+" · "+f.size.toLocaleString()+" bytes. Preparing automatically…");
   trace("file.selected",{sizeBytes:f.size,mediaType:f.type?.split("/")[0]||"unknown"});
+  if(!wallet || !walletFunded){
+    prepareUI("File selected. Press Connect Test Wallet; preparation starts automatically.");
+    return;
+  }
+  try {await prepareFile()}
+  catch(error){trace("file.auto.prepare.error",{message:safeText(error)},"error")}
 });
 on("connect",connectTestWallet);on("importWallet",importWallet);on("forgetWallet",()=>forgetWallet());
 on("backupWallet",()=>walletBackup());
-on("prepare",prepareFile);on("submit",submitGroups);on("resolve",resolvePendingAction);
+on("prepare",prepareFile);on("autoMint",startAutoMint);on("refreshGallery",()=>refreshGallery());
+$("pauseAuto").addEventListener("click",()=>{
+  pauseUploadRequested=true;
+  $("autoStatus").textContent="Pausing safely after the current transaction is verified…";
+  trace("upload.pause.requested");
+});
+on("submit",submitGroups);on("resolve",resolvePendingAction);
 on("mint",mintNFT);on("loadReceipt",readReceiptFile);on("readLedger",readLedger);
 on("export",()=>{if(receipt)exportJson(receipt,"xrpman-receipt-"+receipt.manifest.sha256.slice(0,16)+".json")});
 on("clearCheckpoint",()=>{
@@ -886,11 +908,32 @@ $("network").addEventListener("change",async()=>{
   $("netStatus").textContent="Not connected. Wallet erased from app state on network change.";
   $("networkLabel").textContent=currentNetwork().toUpperCase();
   $("readStatus").textContent="Network changed. Reimport matching receipt.";
+  $("autoStatus").textContent="Network changed. Connect the test wallet before minting.";
+  updateQuote().catch(()=>{});
+  refreshGallery({scanWallet:false}).catch(()=>{});
   prepareUI("Network changed. Choose the file again after connecting your wallet.");
   trace("network.changed",{network:currentNetwork()});
   syncControls();
 });
 window.addEventListener("pagehide",()=>{wallet=null});
+window.addEventListener("beforeunload",event=>{
+  if(autoUploadRunning){event.preventDefault();event.returnValue="";}
+});
+document.addEventListener("visibilitychange",()=>{
+  if(autoUploadRunning && document.visibilityState==="hidden"){
+    pauseUploadRequested=true;
+    trace("upload.background.pause",{reason:"tab hidden"},"warn");
+  }
+});
+try{
+  const cached=JSON.parse(localStorage.getItem(CHECKPOINT_KEY)||"null");
+  if(cached){summarizeReceipt(cached);receipt=cached;displayReceipt();
+    $("autoStatus").textContent="Previous archive detected. Restore its test wallet and reselect the same file to resume.";
+    trace("checkpoint.restored",{archiveId:receipt.manifest.archiveId,
+      confirmed:receipt.confirmed.length,pending:!!receipt.pending});}
+}catch(error){trace("checkpoint.restore.error",{message:safeText(error)},"warn")}
+updateQuote().catch(()=>{});
+refreshGallery({scanWallet:false}).catch(error=>trace("gallery.init.error",{message:safeText(error)},"warn"));
 syncControls();
 trace("app.initialized",{version:"0.2.2",network:currentNetwork(),online:navigator.onLine});
 txLog("Ready. Testnet / Devnet enabled. Mainnet and background signing disabled.");
