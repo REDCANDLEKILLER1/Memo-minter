@@ -11,6 +11,7 @@ import { uploadPlan, estimateFeeDrops, assertFeeBudget, runAutoUpload, SERVICE_F
 import { putGalleryReceipt, getGalleryReceipt, listGalleryReceipts, summarizeReceipt, extractVaultArchiveId } from "./gallery.js";
 import { lookupValidatedTx } from "./ledger-verify.js";
 import { mapValidatedParallel, MAX_READ_CONCURRENCY } from "./parallel-verify.js";
+import { waitForForeground, waitForPageWake } from "./upload-lifecycle.js";
 
 const $ = id => document.getElementById(id);
 const SERVERS = Object.freeze({
@@ -42,6 +43,8 @@ const safeText = err => scrubText(err instanceof Error ? err.message : String(er
 let client = null, wallet = null, rawBytes = null, receipt = null;
 let readerReceipt = null, busy = false, previewUrl = null, walletFunded = false;
 let autoUploadRunning = false, pauseUploadRequested = false, activeAuthorization = null;
+let currentUploadPhase="idle",lastUploadActivity=Date.now(),refreshInProgress=false,lastBalanceRefresh=0;
+let uploadResumeEvents=0;
 let readPeer = null, readPeerNetwork = null, readPeerCooldownUntil = 0;
 let estimatedFeeDrops = null, gallerySaving = Promise.resolve(), galleryRefreshCount = 0;
 let droppedMediaFile=null, localPreviewURL=null;
@@ -275,15 +278,28 @@ async function importWallet(){
     wallet=restored;walletFunded=false;
     $("walletAddr").textContent=wallet.address;
     $("seedFile").value="";
-    $("walletState").textContent="Wallet restored locally. Press Connect Test Wallet to check and fund if needed.";
+    $("walletState").textContent="Local wallet imported. Checking its existing Testnet XRP balance…";
     txLog("Test wallet restored locally: "+wallet.address+" (secret not logged)");
-    if(client?.isConnected()) {
-      try { await refreshBalance(); } catch {
-        $("walletState").textContent="Wallet restored; node lookup failed. Use Connect Test Wallet to retry.";
-      }
+    try{
+      // Local wallet load is one action: connect Testnet and read existing funds.
+      // No faucet request, signing, or server-side custody occurs.
+      if(!client?.isConnected())await connectNetwork();
+      await refreshBalance();
+      $("walletState").textContent=walletFunded
+        ? "Self-custody Testnet wallet connected and funded. Ready."
+        : "Local wallet connected, but no funded Testnet balance. Mainnet balances are separate.";
+      trace("wallet.local.connected",{network:currentNetwork(),funded:walletFunded});
+    }catch(error){
+      $("walletState").textContent="Local wallet loaded; network/balance check unavailable. Tap Connect Test Wallet to retry.";
+      trace("wallet.local.connection.error",{message:safeText(error)},"warn");
     }
-    if(walletFunded) $("walletState").textContent="Test wallet restored and funded. Ready.";
-  } finally {setBusy(false);}
+  } finally {
+    setBusy(false);
+    if(walletFunded && selectedMediaFile() && !rawBytes) {
+      try{await prepareFile()}catch(error){trace("file.auto.prepare.error",{message:safeText(error)},"error")}
+    }
+    refreshGallery({scanWallet:walletFunded}).catch(()=>{});
+  }
 }
 function prepareUI(message,{active=false,progress=null,error=false,ready=false}={}){
   const status=$("prepareStatus"),work=$("prepareWork"),bar=$("prepareReadProgress");
@@ -706,6 +722,67 @@ async function mintApproved(){
   await rememberGalleryReceipt(true);
   trace("upload.mint.success",{hash:receipt.nftHash});
 }
+
+function renderLiveUploadStatus(){
+  const region=$("liveUploadStatus");
+  if(!region)return;
+  const chunks=receipt?.confirmed.length ?? 0, total=receipt?.manifest.totalChunks??0;
+  const seconds=Math.max(0,Math.floor((Date.now()-lastUploadActivity)/1000));
+  const connection=client?.isConnected()?"node connected":"node disconnected";
+  if(autoUploadRunning){
+    const holding=document.visibilityState==="hidden"||!navigator.onLine;
+    const pending=receipt?.pending;
+    region.textContent=(holding?"Paused in background; automatically resumes when you return.":currentUploadPhase)+
+      "\n"+chunks.toLocaleString()+" / "+total.toLocaleString()+" verified chunks · "+
+      connection+" · last activity "+seconds+"s ago"+
+      (pending?"\nChecking signed transaction "+pending.hash.slice(0,12)+"…":"");
+  }else if(receipt?.pending){
+    region.textContent="Previous signed transaction needs confirmation before any more signing.\n"+
+      chunks.toLocaleString()+" / "+total.toLocaleString()+" verified · "+connection;
+  }else if(receipt?.nftHash){
+    region.textContent="Mint validated on "+receipt.manifest.network.toUpperCase()+
+      ". Open My Gallery to retrieve the media.";
+  }else if(receipt){
+    region.textContent="Ready / paused · "+chunks.toLocaleString()+" / "+total.toLocaleString()+
+      " verified chunks · "+connection+". Restored files require the same local wallet.";
+  }else{
+    region.textContent="Live monitor ready · connect your self-custody test wallet to begin.";
+  }
+}
+function uploadPhase(stage,details={}){
+  currentUploadPhase=stage;
+  lastUploadActivity=Date.now();
+  renderLiveUploadStatus();
+  trace("upload.phase",{stage,...details});
+}
+async function waitForSafeForeground(){
+  const ready=await waitForForeground({
+    isVisible:()=>document.visibilityState==="visible",
+    isOnline:()=>navigator.onLine,
+    waitForWake:()=>waitForPageWake(document,window),
+    shouldStop:()=>pauseUploadRequested,
+    onHold:({visible,online})=>{
+      uploadPhase("Waiting safely: "+(!visible?"return to this browser tab":"network connection")+
+        " · upload continues when ready",{visible,online});
+      $("autoStatus").textContent="Upload on hold. Keep this page open; when you return online it resumes automatically without another fee approval.";
+    }
+  });
+  if(!ready)throw new Error("Upload paused at user request");
+  if(!activeAuthorization || !receipt || !wallet ||
+      activeAuthorization.archiveId!==receipt.manifest.archiveId ||
+      wallet.address!==receipt.wallet ||
+      receipt.manifest.network!==currentNetwork())
+    throw new Error("Wallet or upload authorization changed. Stopped before another signature.");
+  if(!client?.isConnected()){
+    uploadPhase("Reconnecting primary XRPL Testnet node");
+    await connectNetwork();
+    await refreshBalance();
+  }
+  if(!walletFunded)throw new Error("Validated Testnet wallet balance unavailable; signing stopped");
+  if(receipt.pending)throw new Error("Previous signed hash unresolved; resolve it before signing anything new");
+  uploadResumeEvents++;
+  if(uploadResumeEvents>1)trace("upload.foreground.ready",{wakeCount:uploadResumeEvents});
+}
 async function startAutoMint(){
   if(busy || autoUploadRunning) return;
   assertConnected();
@@ -714,7 +791,7 @@ async function startAutoMint(){
     throw new Error("Uploaded file and wallet/network do not match");
   if(receipt.pending)throw new Error("A signed transaction is unresolved. Use Advanced → Resolve first.");
   if(receipt.nftHash)throw new Error("This archive already has a confirmed NFT mint");
-  const expected=await updateQuote();
+  await updateQuote();
   const plan=uploadPlan(receipt.manifest.totalChunks,receipt.confirmed.length);
   if(plan.outerTransactions>1500)throw new Error("Upload exceeds the bounded automatic transaction limit");
   const estimate=estimatedFeeDrops||estimateFeeDrops(plan,10);
@@ -728,7 +805,8 @@ async function startAutoMint(){
     "Maximum fee authorized for this run: "+formatDrops(maximum)+"\n"+
     "Platform charge: 0 Test XRP (the future 2 XRP fee is NOT enabled)\n\n"+
     "Your file is permanently public on this test ledger. The app runs sequentially while this tab stays open. "+
-    "It pauses when hidden or offline and stops on any unresolved signed transaction.\n\n"+
+    "It waits safely when the tab is hidden/offline and automatically resumes when you return while this page remains open. "+
+    "It stops on any unresolved signed transaction.\n\n"+
     "Approve this complete upload and NFT mint?";
   if(!confirm(approval)){
     trace("upload.approval.declined",{chunks:plan.remaining});
@@ -739,6 +817,9 @@ async function startAutoMint(){
   activeAuthorization={maxDrops:maximum,committedDrops:0n,archiveId:receipt.manifest.archiveId};
   pauseUploadRequested=false;
   autoUploadRunning=true;
+  uploadResumeEvents=0;
+  currentUploadPhase="Starting XRPL batch upload";
+  lastUploadActivity=Date.now();
   document.body.classList.add("upload-in-progress");
   setBusy(true);
   $("autoMint").textContent="Uploading & verifying…";
@@ -748,14 +829,16 @@ async function startAutoMint(){
   $("uploadProgress").value=receipt.confirmed.length;
   trace("upload.started",{archiveId:receipt.manifest.archiveId,remaining:plan.remaining,
     estimatedFeeDrops:String(estimate),maxApprovedFeeDrops:String(maximum)});
+  renderLiveUploadStatus();
   const currentArchive=receipt.manifest.archiveId;
   try{
     const result=await runAutoUpload({
       getRemaining:()=>nextIndices(),
       maxOuter:1500,
-      shouldPause:()=>pauseUploadRequested || document.visibilityState==="hidden" ||
-        !navigator.onLine || !client?.isConnected(),
+      shouldPause:()=>pauseUploadRequested,
       submitChunkGroup:async(indices)=>{
+        await waitForSafeForeground();
+        uploadPhase("Signing the next XRPL batch",{chunks:indices.length});
         if(!activeAuthorization||activeAuthorization.archiveId!==currentArchive)throw new Error("Upload authorization changed");
         if(receipt.pending)throw new Error("Previous signed hash unresolved; upload stopped");
         const batch=indices.length>=2;
@@ -771,13 +854,18 @@ async function startAutoMint(){
         $("autoStatus").textContent="Uploading · "+receipt.confirmed.length.toLocaleString()+
           " / "+receipt.manifest.totalChunks.toLocaleString()+" pieces verified…";
         await signAndCommit(transaction,batch?"batch":"single",indices);
+        uploadPhase("Batch validated; preparing the next group",{confirmed:receipt.confirmed.length});
       },
       mint:async()=>{
+        await waitForSafeForeground();
+        uploadPhase("All chunks verified; minting the NFT");
         $("autoStatus").textContent="Every data chunk verified. Minting the NFT now…";
         await mintApproved();
       },
       onProgress:({sent,remaining})=>{
+        lastUploadActivity=Date.now();
         $("uploadProgress").value=receipt.confirmed.length;
+        renderLiveUploadStatus();
         $("autoStatus").textContent="Saving to XRPL · "+receipt.confirmed.length.toLocaleString()+
           " / "+receipt.manifest.totalChunks.toLocaleString()+" chunks verified"+
           " · "+remaining.toLocaleString()+" remaining.";
@@ -786,6 +874,7 @@ async function startAutoMint(){
       yieldControl:()=>new Promise(resolve=>setTimeout(resolve,0))
     });
     if(result.state==="complete"){
+      uploadPhase("Mint completed and verified",{hash:receipt.nftHash});
       $("autoStatus").textContent="Mint complete! Your file is verified on XRPL. Find it in My Gallery below.";
       trace("upload.complete",{archiveId:currentArchive,nftHash:receipt.nftHash,outerSent:result.sent});
       await rememberGalleryReceipt(true);
@@ -798,13 +887,15 @@ async function startAutoMint(){
     }
   }catch(error){
     const pending=!!receipt?.pending;
-    $("autoStatus").textContent="Upload stopped: "+safeText(error)+
+    uploadPhase("Upload stopped safely",{pending});
+    $("autoStatus").textContent=(pauseUploadRequested?"Upload paused: ":"Upload stopped: ")+safeText(error)+
       (pending?"\nA signed transaction is unresolved. Do not restart until it has been verified.":"\nYour verified progress is saved; you can resume safely.");
     trace("upload.stopped",{message:safeText(error),pending,confirmed:receipt?.confirmed?.length||0},"error");
   }finally{
     activeAuthorization=null;
     autoUploadRunning=false;
     document.body.classList.remove("upload-in-progress");
+    renderLiveUploadStatus();
     $("autoMint").textContent=receipt?.nftHash?"Minted ✓":"Pay & Mint";
     setBusy(false);displayReceipt();
     updateQuote().catch(()=>{});
@@ -993,6 +1084,7 @@ on("backupWallet",()=>walletBackup());
 on("prepare",prepareFile);on("autoMint",startAutoMint);on("refreshGallery",()=>refreshGallery());
 $("pauseAuto").addEventListener("click",()=>{
   pauseUploadRequested=true;
+  window.dispatchEvent(new Event("xrpman-upload-wake"));
   $("autoStatus").textContent="Pausing safely after the current transaction is verified…";
   trace("upload.pause.requested");
 });
@@ -1031,11 +1123,45 @@ window.addEventListener("beforeunload",event=>{
   if(autoUploadRunning){event.preventDefault();event.returnValue="";}
 });
 document.addEventListener("visibilitychange",()=>{
-  if(autoUploadRunning && document.visibilityState==="hidden"){
-    pauseUploadRequested=true;
-    trace("upload.background.pause",{reason:"tab hidden"},"warn");
+  if(autoUploadRunning){
+    if(document.visibilityState==="hidden"){
+      trace("upload.background.hold",{reason:"tab hidden; wait for return"},"warn");
+      currentUploadPhase="Waiting for browser to return";
+    }else{
+      trace("upload.background.return",{resume:"same authorized session"});
+      lastUploadActivity=Date.now();
+      window.dispatchEvent(new Event("xrpman-upload-wake"));
+    }
+    renderLiveUploadStatus();
   }
 });
+window.addEventListener("online",()=>{
+  if(autoUploadRunning) {
+    trace("upload.network.back");
+    window.dispatchEvent(new Event("xrpman-upload-wake"));
+  }
+  renderLiveUploadStatus();
+});
+window.addEventListener("offline",()=>renderLiveUploadStatus());
+let periodicRefreshBusy=false;
+async function refreshStatusReadOnly(){
+  renderLiveUploadStatus();
+  if(document.visibilityState!=="visible" || !navigator.onLine || periodicRefreshBusy)return;
+  if(autoUploadRunning || busy || !wallet || !client?.isConnected())return;
+  if(Date.now()-lastBalanceRefresh<30000)return;
+  lastBalanceRefresh=Date.now();
+  periodicRefreshBusy=true;
+  try{
+    await refreshBalance();
+    trace("status.refresh.success",{network:currentNetwork(),walletFunded});
+  }catch(error){trace("status.refresh.error",{message:safeText(error)},"warn")}
+  finally{periodicRefreshBusy=false}
+}
+window.setInterval(()=>{
+  renderLiveUploadStatus(); // local UI only; does not need wallet signing or network requests
+  refreshStatusReadOnly().catch(()=>{});
+},5000);
+
 try{
   const cached=JSON.parse(localStorage.getItem(CHECKPOINT_KEY)||"null");
   if(cached){summarizeReceipt(cached);receipt=cached;displayReceipt();
@@ -1046,5 +1172,6 @@ try{
 updateQuote().catch(()=>{});
 refreshGallery({scanWallet:false}).catch(error=>trace("gallery.init.error",{message:safeText(error)},"warn"));
 syncControls();
-trace("app.initialized",{version:"0.2.2",network:currentNetwork(),online:navigator.onLine});
+trace("app.initialized",{version:"0.3.2",network:currentNetwork(),online:navigator.onLine});
+renderLiveUploadStatus();
 txLog("Ready. Testnet / Devnet enabled. Mainnet and background signing disabled.");
