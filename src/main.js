@@ -18,6 +18,11 @@ const SERVERS = Object.freeze({
   devnet: "wss://s.devnet.rippletest.net:51233/"
 });
 const CHECKPOINT_KEY = "xrpman-memo-vault-test-archive-v1";
+// Independent read-only peers: NEVER use these to sign/submit transactions.
+const READ_SERVERS=Object.freeze({
+  testnet:"wss://testnet.honeycluster.io/",
+  devnet:"wss://devnet.honeycluster.io/"
+});
 const MAX_FEE_DROPS = 200000;
 const tfAllOrNothing = 65536;
 const tfInnerBatchTxn = 1073741824;
@@ -37,6 +42,7 @@ const safeText = err => scrubText(err instanceof Error ? err.message : String(er
 let client = null, wallet = null, rawBytes = null, receipt = null;
 let readerReceipt = null, busy = false, previewUrl = null, walletFunded = false;
 let autoUploadRunning = false, pauseUploadRequested = false, activeAuthorization = null;
+let readPeer = null, readPeerNetwork = null, readPeerCooldownUntil = 0;
 let estimatedFeeDrops = null, gallerySaving = Promise.resolve(), galleryRefreshCount = 0;
 let droppedMediaFile=null, localPreviewURL=null;
 function selectedMediaFile(){return droppedMediaFile || $("sourceFile").files[0] || null;}
@@ -386,13 +392,54 @@ function memoForChunk(index){
   return [{Memo:{MemoType:textHex(MEMO_TYPE),MemoData:encodeChunk(chunk,receipt.manifest.sha256,index,receipt.manifest.totalChunks)}}];
 }
 function resultCode(result){return typeof result.meta==="string"?result.meta:result.meta?.TransactionResult;}
-async function readValidated(hash,expectedType=null){
-  trace("tx.lookup",{hash,expectedType});
+async function openReadPeer(){
+  const network=currentNetwork();
+  if(readPeer?.isConnected() && readPeerNetwork===network)return true;
+  if(Date.now()<readPeerCooldownUntil)return false;
+  if(readPeer){try{await readPeer.disconnect()}catch{}readPeer=null}
+  const url=READ_SERVERS[network];
+  if(!url)return false;
+  const peer=new xrpl.Client(url,{connectionTimeout:5000,timeout:9000});
+  try{
+    await peer.connect();
+    // Only a read-only connection; all submissions stay on the existing TX client.
+    await peer.request({command:"server_info"});
+    readPeer=peer;readPeerNetwork=network;
+    trace("read.peer.ready",{network,provider:"honeycluster",mode:"read-only"});
+    return true;
+  }catch(error){
+    try{await peer.disconnect()}catch{}
+    readPeer=null;readPeerNetwork=null;readPeerCooldownUntil=Date.now()+60000;
+    trace("read.peer.unavailable",{network,message:safeText(error),fallback:"primary"},"warn");
+    return false;
+  }
+}
+async function readValidated(hash,expectedType=null,{preferReadPeer=false}={}){
+  trace("tx.lookup",{hash,expectedType,readLane:preferReadPeer?"standby-preferred":"primary"});
+  let usedPeer=false;
+  if(preferReadPeer && readPeer?.isConnected() && readPeerNetwork===currentNetwork() &&
+     Date.now()>=readPeerCooldownUntil){
+    usedPeer=true;
+    try {
+      const result=await lookupValidatedTx(readPeer,hash,expectedType,{
+        attempts:2,initialDelayMs:350,
+        onRetry:({attempt,reason})=>trace("read.peer.retry",{hash,attempt,reason},"warn")
+      });
+      trace("tx.validated",{hash,type:result.tx.TransactionType,ledgerIndex:result.result.ledger_index,
+        provider:"honeycluster"});
+      return result;
+    }catch(error){
+      readPeerCooldownUntil=Date.now()+60000;
+      trace("read.peer.fallback",{hash,message:safeText(error)},"warn");
+      // Missing proof from standby never proves failure. Verify exact hash on primary instead.
+    }
+  }
   const out=await lookupValidatedTx(client,hash,expectedType,{
     attempts:5,initialDelayMs:800,
     onRetry:({attempt,reason})=>trace("tx.lookup.retry",{hash,attempt,reason},"warn")
   });
-  trace("tx.validated",{hash,type:out.tx.TransactionType,ledgerIndex:out.result.ledger_index});
+  trace("tx.validated",{hash,type:out.tx.TransactionType,ledgerIndex:out.result.ledger_index,
+    provider:usedPeer?"primary-fallback":"primary"});
   return out;
 }
 async function settlePending(){
@@ -410,8 +457,8 @@ async function settlePending(){
   // inner transaction hashes are validated, even if the outer Batch says tesSUCCESS.
   const validated = await mapValidatedParallel(
     p.entries,
-    async(entry)=>{
-      const inner=await readValidated(entry.hash,"AccountSet");
+    async(entry,index)=>{
+      const inner=await readValidated(entry.hash,"AccountSet",{preferReadPeer:index%2===1});
       if(inner.tx.Account!==receipt.wallet)throw new Error("Inner account mismatch");
       const memo=inner.tx.Memos?.find(m=>m?.Memo?.MemoType===textHex(MEMO_TYPE));
       if(!memo?.Memo?.MemoData)throw new Error("Expected data memo missing at "+entry.hash);
@@ -688,6 +735,7 @@ async function startAutoMint(){
     $("autoStatus").textContent="Nothing submitted. Your file remains prepared.";
     return;
   }
+  await openReadPeer(); // optional independent Honeycluster read lane; never a submission path
   activeAuthorization={maxDrops:maximum,committedDrops:0n,archiveId:receipt.manifest.archiveId};
   pauseUploadRequested=false;
   autoUploadRunning=true;
@@ -964,6 +1012,8 @@ $("network").addEventListener("change",async()=>{
   $("walletState").textContent="Network changed. Press Connect Test Wallet to generate and fund a new test account.";
   $("backupStatus").textContent="The new wallet will request a JSON backup download. Save it for recovery.";
   if(client){try{await client.disconnect()}catch{}client=null}
+  if(readPeer){try{await readPeer.disconnect()}catch{}readPeer=null;readPeerNetwork=null}
+  readPeerCooldownUntil=0;
   $("netStatus").textContent="Not connected. Wallet erased from app state on network change.";
   $("networkLabel").textContent=currentNetwork().toUpperCase();
   $("readStatus").textContent="Network changed. Reimport matching receipt.";
