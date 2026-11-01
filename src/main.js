@@ -739,6 +739,7 @@ async function startAutoMint(){
   activeAuthorization={maxDrops:maximum,committedDrops:0n,archiveId:receipt.manifest.archiveId};
   pauseUploadRequested=false;
   autoUploadRunning=true;
+  document.body.classList.add("upload-in-progress");
   setBusy(true);
   $("autoMint").textContent="Uploading & verifying…";
   $("autoStatus").textContent="Starting automatically. Keep this tab open. You can pause after the current batch.";
@@ -803,6 +804,7 @@ async function startAutoMint(){
   }finally{
     activeAuthorization=null;
     autoUploadRunning=false;
+    document.body.classList.remove("upload-in-progress");
     $("autoMint").textContent=receipt?.nftHash?"Minted ✓":"Pay & Mint";
     setBusy(false);displayReceipt();
     updateQuote().catch(()=>{});
