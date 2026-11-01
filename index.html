@@ -17,6 +17,23 @@
 @keyframes spin{to{transform:rotate(360deg)}}
 .ledger-label{font-size:12px;color:#8fae96;margin:8px 0 2px}
 /* Compact fixed ladybug: diagnostics are completely local and user-exported. */
+/* Mobile-safe debug launcher: keep it above browser bottom bars and progress overlays. */
+#ladybugToggle{
+  position:fixed!important;top:calc(env(safe-area-inset-top, 0px) + 72px)!important;
+  bottom:auto!important;right:10px!important;z-index:2147483646!important;
+  display:grid!important;visibility:visible!important;opacity:1!important;
+  pointer-events:auto!important;transform:translateZ(0);
+  width:44px;height:44px;touch-action:manipulation;
+}
+#debugPanel{
+  position:fixed!important;top:calc(env(safe-area-inset-top, 0px) + 122px)!important;
+  bottom:auto!important;right:10px!important;z-index:2147483645!important;
+  max-height:min(65dvh, 560px);
+}
+body.upload-in-progress #ladybugToggle{
+  box-shadow:0 0 0 3px #00ff0066,0 2px 18px #000d!important;
+}
+
 #ladybugToggle{position:fixed;right:12px;bottom:12px;z-index:1001;width:45px;height:45px;border-radius:50%;padding:0;margin:0;background:#c92828;color:#050505;border:2px solid #171717;box-shadow:0 4px 15px #000b;font-size:26px;display:grid;place-items:center;line-height:1;transform:none}
 #ladybugToggle:focus-visible{outline:3px solid #00ff00;outline-offset:3px}
 #debugCount{position:absolute;right:-3px;top:-4px;background:#fff;color:#990000;border:1px solid #990000;border-radius:20px;padding:0 4px;font-size:10px;line-height:16px;min-width:16px}
@@ -61,7 +78,7 @@ details.advanced summary{color:#b1d1b6;font-size:13px}
 .usage-note{font-size:12px;color:#b1c2b3}
 #pauseAuto{background:#623a1d;color:#ffeed0}
 </style></head><body>
-<header><h1>XRPMAN <span style="color:#fff">MEMO MINTER</span></h1><div class="sub">REAL XRPL DATA STORAGE · BATCHES · ARCHIVE READER · NFT ANCHOR</div><span class="pill">v0.3.0 • AUTOMATIC UPLOAD + NFT GALLERY • MAINNET DISABLED</span></header>
+<header><h1>XRPMAN <span style="color:#fff">MEMO MINTER</span></h1><div class="sub">REAL XRPL DATA STORAGE · BATCHES · ARCHIVE READER · NFT ANCHOR</div><span class="pill">v0.3.1 • FASTER VERIFY + FIXED LADYBUG • MAINNET DISABLED</span></header>
 <div class="warn">Use a disposable Testnet wallet only. One button creates it locally, requests free Testnet XRP from the XRPL faucet, and verifies the ledger balance. Save your downloaded test-wallet backup to resume later; the seed is never uploaded to our site. Never reuse a Mainnet seed. Ledger data is public.</div>
 <section class="panel"><h2>01 / One-tap Test Wallet</h2>
 <p class="section-desc">No separate faucet website or manual seed entry. Press the button once; this app creates a disposable XRPL wallet in your browser, requests free test XRP, and verifies it from a validated ledger.</p>
