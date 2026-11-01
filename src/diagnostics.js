@@ -75,7 +75,7 @@ export function createDiagnosticStore(storage=null, now=()=>new Date().toISOStri
     },
     list(){return events.map(e=>({time:e.time,level:e.level,stage:e.stage,details:scrubDetails(e.details)}))},
     summary(){return {total:events.length,errors,last:events.at(-1)||null}},
-    report(){flush();return {app:"XRPMan Memo Minter",version:"0.3.1-debug",exportedAt:now(),network:"LOCAL_DIAGNOSTICS_ONLY",events:this.list()}},
+    report(){flush();return {app:"XRPMan Memo Minter",version:"0.3.2-debug",exportedAt:now(),network:"LOCAL_DIAGNOSTICS_ONLY",events:this.list()}},
     flush,
     clear(){events=[];errors=0;schedulePersist(true);notify()},
     subscribe(fn){listeners.add(fn);return ()=>listeners.delete(fn)}
@@ -109,14 +109,26 @@ export function mountLadybug(store, doc=document, globalWindow=window) {
       line.append(stamp,detail);items.append(line);
     }
   };
-  toggle.addEventListener("click",()=>{
-    panel.hidden=!panel.hidden;
-    toggle.setAttribute("aria-expanded",String(!panel.hidden));
-    render();
-  });
-  doc.getElementById("debugClose").addEventListener("click",()=>{
-    panel.hidden=true;toggle.setAttribute("aria-expanded","false");
-  });
+  // Debug bootstrap owns click events if it loaded before this module. Never
+  // attach duplicate handlers: two toggles would cancel each other out.
+  const bootOwnsControls=globalWindow.__xrpmanDebugControlOwner==="boot";
+  if(!bootOwnsControls) {
+    globalWindow.__xrpmanDebugControlOwner="app";
+    const switches=[toggle,doc.getElementById("debugDockToggle")].filter(Boolean);
+    for(const button of switches)button.addEventListener("click",()=>{
+      panel.hidden=!panel.hidden;
+      for(const target of switches)target.setAttribute("aria-expanded",String(!panel.hidden));
+      render();
+    });
+    doc.getElementById("debugClose").addEventListener("click",()=>{
+      panel.hidden=true;
+      for(const target of switches)target.setAttribute("aria-expanded","false");
+    });
+  }
+  globalWindow.__xrpmanDebugRender=render;
+  globalWindow.__xrpmanDebugReady=true;
+  const health=doc.getElementById("debugHealth");
+  if(health)health.textContent="Debug active · logs saved locally";
   doc.getElementById("debugDownload").addEventListener("click",()=>{
     const blob=new Blob([JSON.stringify(store.report(),null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);
