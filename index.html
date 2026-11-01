@@ -33,8 +33,31 @@
 .debug-entry small{color:#91b699}
 .debug-error{border-left:3px solid #e04545;color:#ffd6d6;padding-left:8px}
 @media(max-width:540px){#debugPanel{max-height:65dvh}#ladybugToggle{right:10px;bottom:max(10px,env(safe-area-inset-bottom))}#debugPanel{bottom:calc(65px + env(safe-area-inset-bottom))}}
+
+.drop-media{display:block;border:2px dashed #267b37;padding:26px 14px;border-radius:14px;background:#09140b;text-align:center;margin:14px 0;cursor:pointer}
+.drop-media strong{display:block;font-size:20px;color:#00ff00;margin-bottom:6px}
+.drop-media span{color:#aec6b3;font-size:13px}
+.drop-media input{border:0;margin:10px auto 0;padding:8px;background:none;text-align:center}
+.hero-action{font-size:18px;padding:15px 26px;min-height:54px;width:100%;max-width:430px}
+.quote-box{margin:16px 0;padding:14px;background:#07130b;border:1px solid #28653a;border-radius:12px}
+.quote-box strong{color:#00ff00}
+.gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin:14px 0}
+.gallery-item{padding:13px;background:#07120a;border:1px solid #35613d;border-radius:12px;min-width:0;display:flex;flex-direction:column;gap:7px}
+.gallery-icon{font-size:32px;height:46px}
+.gallery-title{overflow-wrap:anywhere;font-weight:650}
+.gallery-type,.gallery-count{font-size:12px;color:#9bb6a1}
+.gallery-item button{font-size:13px;padding:9px 11px;margin:0}
+.gallery-item .status-ready{color:#00ff00}
+.gallery-item .status-pending{color:#eecf80}
+#uploadProgress{height:19px}
+#galleryStatus,#autoStatus{white-space:pre-wrap}
+summary{cursor:pointer}
+details.advanced{border:1px solid #22482b;border-radius:9px;padding:9px 12px;margin:14px 0}
+details.advanced summary{color:#b1d1b6;font-size:13px}
+.usage-note{font-size:12px;color:#b1c2b3}
+#pauseAuto{background:#623a1d;color:#ffeed0}
 </style></head><body>
-<header><h1>XRPMAN <span style="color:#fff">MEMO MINTER</span></h1><div class="sub">REAL XRPL DATA STORAGE · BATCHES · ARCHIVE READER · NFT ANCHOR</div><span class="pill">v0.2.2 • LADYBUG DEBUG + PREPARE PROGRESS • MAINNET DISABLED</span></header>
+<header><h1>XRPMAN <span style="color:#fff">MEMO MINTER</span></h1><div class="sub">REAL XRPL DATA STORAGE · BATCHES · ARCHIVE READER · NFT ANCHOR</div><span class="pill">v0.3.0 • AUTOMATIC UPLOAD + NFT GALLERY • MAINNET DISABLED</span></header>
 <div class="warn">Use a disposable Testnet wallet only. One button creates it locally, requests free Testnet XRP from the XRPL faucet, and verifies the ledger balance. Save your downloaded test-wallet backup to resume later; the seed is never uploaded to our site. Never reuse a Mainnet seed. Ledger data is public.</div>
 <section class="panel"><h2>01 / One-tap Test Wallet</h2>
 <p class="section-desc">No separate faucet website or manual seed entry. Press the button once; this app creates a disposable XRPL wallet in your browser, requests free test XRP, and verifies it from a validated ledger.</p>
@@ -48,27 +71,70 @@
 <button id="importWallet" class="secondary">Restore Wallet JSON</button>
 <p class="section-desc">The JSON contains your test seed; do not share it. Format: <code>{"seed":"s..."}</code>. Restoration stays inside your browser.</p>
 </details></section>
-<section class="panel"><h2>02 / Encode &amp; archive</h2><p class="section-desc">Choose a file. This produces a SHA-256 manifest and a verified protocol envelope for each chunk; your original bytes are not modified.</p>
-<input id="sourceFile" type="file"/>
-<div id="prepareStatus" class="prepare-status" role="status" aria-live="polite">Select a file, then press Prepare file.</div>
+<section class="panel" id="uploadSection"><h2>02 / Upload Your Media</h2>
+<p class="section-desc">Upload a picture, song, video, PDF or other file. Memo Minter automatically divides it into XRPL transaction data and prepares your archive. You don't have to do anything technical.</p>
+<label class="drop-media" for="sourceFile"><strong>Choose an image, song, video or file</strong><span>Tap to select media · currently up to 5 MiB (larger video support is a later upgrade)</span>
+<input id="sourceFile" type="file" aria-label="Choose media to mint"></label>
+<div id="prepareStatus" class="prepare-status" role="status" aria-live="polite">Connect your Test Wallet, then choose a file.</div>
 <div id="prepareWork" class="prepare-work" hidden role="status" aria-live="polite">
 <span class="spinner" aria-hidden="true"></span><strong id="prepareStage">Preparing file…</strong>
-<progress id="prepareReadProgress" max="100" value="0" aria-label="File read progress"></progress></div>
-<div class="row"><button id="prepare">Prepare file</button><button id="export" class="secondary" disabled>Export upload receipt</button><button id="clearCheckpoint" class="danger">Discard local checkpoint</button></div>
-<div class="grid"><div class="stat"><strong id="fileName">—</strong><span>File</span></div><div class="stat"><strong id="fileSize">—</strong><span>File size</span></div><div class="stat"><strong id="chunkCount">—</strong><span>Number of data transactions</span></div><div class="stat"><strong id="batchCount">—</strong><span>Projected Batch transactions</span></div><div class="stat"><strong id="doneCount">0</strong><span>Verified chunks on ledger</span></div><div class="stat"><strong id="hashShort">—</strong><span>SHA-256 digest</span></div></div><div class="ledger-label">Confirmed on-ledger upload progress (not local preparation)</div><progress id="progress" value="0" max="1"></progress>
-<p class="section-desc" id="archiveId">No prepared file</p>
+<progress id="prepareReadProgress" max="100" value="0" aria-label="File preparation progress"></progress></div>
+<div class="grid">
+<div class="stat"><strong id="fileName">—</strong><span>File</span></div>
+<div class="stat"><strong id="fileSize">—</strong><span>Size</span></div>
+<div class="stat"><strong id="chunkCount">—</strong><span>Data chunks (automatically packaged)</span></div>
+<div class="stat"><strong id="batchCount">—</strong><span>Expected XRPL batches</span></div>
+<div class="stat"><strong id="doneCount">0</strong><span>Chunks confirmed on ledger</span></div>
+<div class="stat"><strong id="hashShort">—</strong><span>SHA-256 integrity hash</span></div>
+</div>
+<p class="section-desc" id="archiveId">No file selected</p>
+<details class="advanced"><summary>Advanced / backup options</summary>
+<div class="row"><button id="prepare" class="secondary">Reprepare File</button>
+<button id="export" class="secondary" disabled>Download Archive Receipt</button>
+<button id="clearCheckpoint" class="danger">Discard Local Checkpoint</button></div>
+<p class="usage-note">A receipt contains transaction hashes and the archive manifest, not the uploaded file or your wallet seed.</p>
+</details>
 </section>
-<section class="panel"><h2>03 / Real transaction submissions</h2><p class="section-desc">Use native XRPL Batch for groups of 2–8 transactions when supported by the selected network. Single mode is available for compatibility. One button press submits at most the selected number of outer transactions, sequentially, with a ledger verification gate after each.</p>
-<div class="row"><label>Mode <select id="mode"><option value="batch">Native Batch (2–8)</option><option value="single">Individual AccountSet</option></select></label><label>Maximum outer transactions per click <input id="perRun" type="number" min="1" max="4" value="1"></label></div>
-<label><input id="consent" type="checkbox"/>I understand these are real ledger writes on a disposable non-mainnet account, with network fees and irreversible public data.</label>
-<div class="row"><button id="submit" disabled>Submit next verified chunk group</button><button id="resolve" class="secondary" disabled>Resolve pending hash</button><button id="mint" class="secondary" disabled>Mint archive NFT</button></div>
+<section class="panel" id="mintSection"><h2>03 / Pay &amp; Mint</h2>
+<p class="section-desc">Approve the total Testnet fee budget once. The app submits the required batches sequentially, verifies each on the ledger, and mints one NFT when the complete file checks out.</p>
+<div id="quoteBox" class="quote-box" role="status">
+<strong id="quotePrice">Upload a file to calculate the price.</strong>
+<div id="quoteDetails" class="section-desc">Platform charge: 0 Test XRP during testing. A possible 2 XRP service fee is not active.</div>
+</div>
+<button id="autoMint" class="hero-action" disabled>Pay &amp; Mint</button>
+<button id="pauseAuto" type="button" hidden>Pause after Current Batch</button>
+<div id="autoStatus" class="section-desc" role="status" aria-live="polite">Connect a test wallet and select a file to begin.</div>
+<div class="ledger-label">Verified data stored on XRPL</div>
+<progress id="progress" value="0" max="1" aria-label="Verified XRPL data progress"></progress>
+<progress id="uploadProgress" value="0" max="1" hidden aria-label="Automatic upload progress"></progress>
+<details class="advanced"><summary>Advanced transaction controls and troubleshooting</summary>
+<div class="row"><label>Mode <select id="mode"><option value="batch">Native Batch (2–8)</option><option value="single">Individual AccountSet</option></select></label><label>Manual outer transactions <input id="perRun" type="number" min="1" max="4" value="1"></label></div>
+<label><input id="consent" type="checkbox"/>I approve manually submitted Testnet transactions.</label>
+<div class="row"><button id="submit" class="secondary" disabled>Submit next batch manually</button>
+<button id="resolve" class="secondary" disabled>Resolve pending transaction hash</button>
+<button id="mint" class="secondary" disabled>Mint verified NFT manually</button></div>
 <div id="writeStatus" class="section-desc">Prepare a file and load a test wallet.</div>
-<div class="warn">Safety gates: maximum 4 outer transactions per click, 0.2 XRP maximum fee per transaction, no automatic retries after unknown outcomes, no background transaction sender, and Mainnet entirely absent.</div>
+<p class="usage-note">The automated uploader has a strict 1 Test XRP per-session fee limit, 0.2 XRP maximum per outer transaction, and stops if any signed transaction outcome is uncertain. Mainnet and the 2 XRP platform charge remain disabled.</p>
+</details>
 </section>
-<section class="panel"><h2>04 / Read actual XRPL transactions</h2><p class="section-desc">Import a completed XRPMan upload receipt, then retrieve every confirmed chunk directly from the ledger by its validated transaction hash. The file is reconstructed only after every chunk and its SHA-256 verify.</p>
-<input type="file" id="receiptFile" accept=".json,application/json"/><div class="row"><button id="loadReceipt" class="secondary">Load receipt</button><button id="readLedger">Read &amp; reconstruct from XRPL</button></div>
-<div class="log" id="readStatus">No receipt loaded.</div><div id="preview"></div><a id="downloadFile" hidden download>Download verified file</a>
-</section><section class="panel"><h2>05 / Ledger receipts</h2><div class="log" id="txLog">No transactions submitted.</div></section>
+<section class="panel" id="gallerySection"><h2>04 / My Gallery</h2>
+<p class="section-desc">See your completed NFTs and archives. Tap an item to reconstruct its media from validated XRPL transaction history. Your saved archive receipts remain on this device; you can export and restore them.</p>
+<div class="row"><button id="refreshGallery" class="secondary">Refresh Gallery</button></div>
+<div id="galleryStatus" class="section-desc" role="status">No gallery items loaded yet.</div>
+<div id="galleryGrid" class="gallery-grid" aria-label="My NFT and media gallery"></div>
+<div id="galleryViewer">
+<h3>Media Viewer</h3>
+<div id="readStatus" class="log">Select a completed gallery item to read it from XRPL.</div>
+<div id="preview"></div><a id="downloadFile" hidden download>Download verified file</a>
+</div>
+<details class="advanced"><summary>Import a previously saved archive receipt</summary>
+<input type="file" id="receiptFile" accept=".json,application/json"/>
+<div class="row"><button id="loadReceipt" class="secondary">Import archive receipt</button>
+<button id="readLedger" class="secondary">Verify and View on XRPL</button></div>
+</details>
+</section>
+<details class="panel advanced"><summary>05 / Detailed XRPL transaction receipts</summary>
+<div class="log" id="txLog">No transactions submitted.</div></details>
 <footer>XRPMan Memo Minter • Non-custodial browser signer (test wallets only) • No servers receiving seeds • Not a production security audit</footer>
 <button type="button" id="ladybugToggle" aria-label="Open ladybug debug log" aria-expanded="false" aria-controls="debugPanel" title="Debug log">🐞<span id="debugCount" hidden></span></button>
 <aside id="debugPanel" role="dialog" aria-label="Ladybug diagnostic log" hidden>
