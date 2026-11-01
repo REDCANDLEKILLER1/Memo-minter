@@ -5,6 +5,8 @@ import {
   validateReceipt, reassemble
 } from "./protocol.js";
 import { assertTestNetwork, fundAndVerifyTestWallet, readValidatedDrops } from "./test-wallet.js";
+import { createDiagnosticStore, mountLadybug, installGlobalDiagnostics, scrubText } from "./diagnostics.js";
+import { readFileWithProgress } from "./file-reader.js";
 
 const $ = id => document.getElementById(id);
 const SERVERS = Object.freeze({
@@ -16,10 +18,18 @@ const MAX_FEE_DROPS = 200000;
 const tfAllOrNothing = 65536;
 const tfInnerBatchTxn = 1073741824;
 const textHex = value => toHex(new TextEncoder().encode(value));
-const info = text => { $("writeStatus").textContent = text; };
-const txLog = text => { $("txLog").textContent = new Date().toLocaleTimeString()+" "+text+"\n"+$("txLog").textContent.slice(0,10000); };
+const diagnostics = createDiagnosticStore(window.localStorage);
+mountLadybug(diagnostics);installGlobalDiagnostics(diagnostics);
+const trace = (stage,details={},level="info") => diagnostics.add(level,stage,details);
+const info = text => { $("writeStatus").textContent = scrubText(text); };
+const txLog = text => {
+  const message = scrubText(text);
+  $("txLog").textContent = new Date().toLocaleTimeString()+" "+message+"\n"+$("txLog").textContent.slice(0,10000);
+  const level = /ERROR|FAILED|UNRESOLVED|UNCERTAIN|STOPPED|NOT FUNDED|REJECTED/i.test(message) ? "error" : "info";
+  trace("ledger.message",{message},level);
+};
 const checked = () => { if (!$("consent").checked) throw new Error("Confirm the Testnet/Devnet ledger-write disclosure first"); };
-const safeText = err => err instanceof Error ? err.message : String(err);
+const safeText = err => scrubText(err instanceof Error ? err.message : String(err));
 let client = null, wallet = null, rawBytes = null, receipt = null;
 let readerReceipt = null, busy = false, previewUrl = null, walletFunded = false;
 
@@ -165,6 +175,7 @@ async function connectTestWallet() {
     const funding=await fundAndVerifyTestWallet({
       client,wallet,network:selected,
       onStatus: stage => {
+        trace("wallet.funding.stage",{stage,network:selected});
         if(stage==="request-faucet")$("walletState").textContent="Requesting free "+selected+" XRP from the test faucet...";
         if(stage==="verify-ledger")$("walletState").textContent="Checking confirmed wallet balance on the "+selected+" ledger...";
       }
@@ -176,8 +187,10 @@ async function connectTestWallet() {
     txLog("VALIDATED "+selected+" balance for "+wallet.address+": "+funding.balanceDrops+" drops"+
       (funding.alreadyFunded?" (existing funded account)":" (faucet funded)"));
     info("Test wallet is funded. Choose a file and press Prepare file.");
+    trace("wallet.funded",{balanceDrops:String(funding.balanceDrops),network:selected});
   } catch(error) {
     walletFunded=false;
+    trace("wallet.funding.error",{message:safeText(error)},"error");
     $("walletState").textContent="Not funded yet: "+safeText(error);
     $("netStatus").textContent="Not ready · press Retry Test Wallet";
     txLog("WALLET NOT FUNDED: "+safeText(error)+" · same wallet kept for retry");
@@ -216,25 +229,76 @@ async function importWallet(){
     if(walletFunded) $("walletState").textContent="Test wallet restored and funded. Ready.";
   } finally {setBusy(false);}
 }
+function prepareUI(message,{active=false,progress=null,error=false,ready=false}={}){
+  const status=$("prepareStatus"),work=$("prepareWork"),bar=$("prepareReadProgress");
+  status.textContent=message;
+  status.classList.toggle("error",error);
+  status.classList.toggle("ready",ready);
+  work.hidden=!active;
+  $("prepareStage").textContent=message;
+  if(progress===null){bar.removeAttribute("value")}else{bar.value=progress}
+  $("prepare").textContent=active?"Preparing…":"Prepare file";
+}
+const deferPaint=()=>new Promise(resolve=>setTimeout(resolve,0));
 async function prepareFile(){
-  if(busy)return;
+  if(busy) {
+    trace("prepare.blocked",{reason:"another operation active"},"warn");
+    return;
+  }
   const file=$("sourceFile").files[0];
-  if(!file)throw new Error("Choose a file");
-  if(file.size<1 || file.size>MAX_FILE_BYTES) throw new Error("Allowed file size: 1 byte to 5 MiB (streaming uploads planned later)");
-  if(!wallet || !walletFunded)throw new Error("Press Connect Test Wallet first; funding must be verified.");
-  assertConnected();
+  if(!file) {
+    prepareUI("Select an image, song or other file before pressing Prepare.",{error:true});
+    throw new Error("No file selected");
+  }
+  if(file.size<1 || file.size>MAX_FILE_BYTES) {
+    prepareUI("File is empty or exceeds the current 5 MiB limit. Choose a smaller file.",{error:true});
+    throw new Error("Allowed file size: 1 byte to 5 MiB (streaming uploads planned later)");
+  }
+  if(!wallet || !walletFunded) {
+    prepareUI("Connect and fund the Test Wallet before preparing the file.",{error:true});
+    throw new Error("Press Connect Test Wallet first; funding must be verified");
+  }
+  try { assertConnected(); }
+  catch(error){
+    prepareUI("XRPL node is disconnected. Reconnect the Test Wallet and retry.",{error:true});
+    throw error;
+  }
   setBusy(true);
+  const started=performance.now();
+  let lastPercent=-1;
+  const mediaType=file.type?.split("/")[0]||"unknown";
+  trace("prepare.start",{sizeBytes:file.size,mediaType,network:currentNetwork()});
+  prepareUI("Preparing your file · reading 0%",{active:true,progress:0});
   try{
-    rawBytes=new Uint8Array(await file.arrayBuffer());
-    const hash=await digestHex(rawBytes);
+    await deferPaint(); // let the progress UI paint before reading/hashing
+    const loadedBytes=await readFileWithProgress(file,(loaded,total)=>{
+      const percent=Math.round(loaded/total*100);
+      prepareUI("Reading image/file: "+percent+"% ("+loaded.toLocaleString()+" / "+total.toLocaleString()+" bytes)",{active:true,progress:percent});
+      if(percent===100 || percent>=lastPercent+20){
+        lastPercent=percent;
+        trace("prepare.read",{percent,loadedBytes:loaded,totalBytes:total});
+      }
+    });
+    prepareUI("File loaded · calculating SHA-256 fingerprint…",{active:true,progress:null});
+    trace("prepare.hash.start",{sizeBytes:file.size});
+    await deferPaint();
+    const hash=await digestHex(loadedBytes);
+    trace("prepare.hash.complete",{hash,elapsedMs:Math.round(performance.now()-started)});
+    prepareUI("Building upload manifest and checking saved progress…",{active:true,progress:null});
+    await deferPaint();
     const manifest=manifestFor(file,hash,currentNetwork());
     const saved=localStorage.getItem(CHECKPOINT_KEY);
     let old=null;
-    if(saved)try{old=JSON.parse(saved);validateReceipt(old)}catch{old=null}
+    if(saved) {
+      try{old=JSON.parse(saved);validateReceipt(old)}
+      catch(error){old=null;trace("prepare.checkpoint.invalid",{reason:safeText(error)},"warn")}
+    }
     if(old && old.manifest.archiveId===manifest.archiveId &&
         old.manifest.network===manifest.network && old.wallet===wallet.address){
       if(old.manifest.size!==manifest.size||old.manifest.totalChunks!==manifest.totalChunks)throw new Error("Saved checkpoint conflicts with selected file");
-      receipt=old; txLog("Resumed saved checkpoint. "+old.confirmed.length+" chunks already verified.");
+      receipt=old;
+      trace("prepare.checkpoint.resumed",{confirmed:old.confirmed.length,total:manifest.totalChunks});
+      txLog("Resumed saved checkpoint. "+old.confirmed.length+" chunks already verified.");
     }else{
       if(old && (old.confirmed?.length || old.pending) &&
           !confirm("This browser holds a different upload checkpoint. Export it before starting a new file. Replace checkpoint now?"))
@@ -242,7 +306,19 @@ async function prepareFile(){
       receipt={format:"XRPMan-MemoVault-Receipt",version:1,manifest,
         wallet:wallet.address,confirmed:[],outerTransactions:[],pending:null,nftHash:null};
     }
-    saveReceipt();displayReceipt();
+    rawBytes=loadedBytes; // do not overwrite previously active file until the receipt is accepted
+    saveReceipt();
+    displayReceipt();
+    const batches=Math.ceil(manifest.totalChunks/8);
+    prepareUI("✓ Prepared successfully: "+manifest.totalChunks.toLocaleString()+
+      " memo chunks · about "+batches.toLocaleString()+
+      " batches. No transactions submitted yet. Continue to Section 03.",{ready:true});
+    trace("prepare.success",{chunks:manifest.totalChunks,batches,hash,elapsedMs:Math.round(performance.now()-started)});
+    txLog("File prepared locally: "+manifest.totalChunks+" chunks, "+batches+" estimated batches. Zero ledger writes.");
+  }catch(error){
+    prepareUI("Preparation failed: "+safeText(error)+". Tap the ladybug to export the diagnostic log.",{error:true});
+    trace("prepare.error",{message:safeText(error),elapsedMs:Math.round(performance.now()-started)},"error");
+    throw error;
   }finally{setBusy(false)}
 }
 function nextIndices(){
@@ -259,18 +335,21 @@ function memoForChunk(index){
 function readTxJson(result){return result.tx_json || result.tx || result.transaction || result;}
 function resultCode(result){return typeof result.meta==="string"?result.meta:result.meta?.TransactionResult;}
 async function readValidated(hash,expectedType=null){
+  trace("tx.lookup",{hash,expectedType});
   const response=await client.request({command:"tx",transaction:hash});
   const result=response.result||{};
   if(result.validated!==true)throw new Error("Transaction not validated: "+hash);
   const tx=readTxJson(result);
   if(expectedType && tx.TransactionType!==expectedType)throw new Error("Unexpected transaction type at "+hash);
   if(resultCode(result)!=="tesSUCCESS")throw new Error("Ledger result "+(resultCode(result)||"unknown")+" for "+hash);
+  trace("tx.validated",{hash,type:tx.TransactionType,ledgerIndex:result.ledger_index});
   return {tx,result};
 }
 async function settlePending(){
   if(!receipt?.pending)return;
   assertConnected();
   const p=receipt.pending;
+  trace("tx.reconcile.start",{kind:p.kind,hash:p.hash,entries:p.entries.length});
   const {tx}=await readValidated(p.hash,p.kind==="batch"?"Batch":p.kind==="mint"?"NFTokenMint":"AccountSet");
   if(tx.Account!==receipt.wallet)throw new Error("Validated account differs from receipt");
   if(p.kind==="batch" && (!Array.isArray(tx.RawTransactions)||tx.RawTransactions.length!==p.entries.length))
@@ -302,9 +381,11 @@ async function settlePending(){
   receipt.pending=null;
   saveReceipt();displayReceipt();
   txLog("LEDGER VALIDATED "+p.kind.toUpperCase()+" "+p.hash+" ("+p.entries.length+" chunks)");
+  trace("tx.reconcile.success",{kind:p.kind,hash:p.hash,entries:p.entries.length});
 }
 async function signAndCommit(tx,kind,indices){
   // Caller has already passed the explicit-gate and pending checks.
+  trace("tx.prepare.start",{kind,chunkCount:indices.length,network:currentNetwork()});
   let prepared;
   if(kind==="batch"){
     prepared=await client.autofill(tx);
@@ -328,13 +409,16 @@ async function signAndCommit(tx,kind,indices){
   const entries=(kind==="batch"
     ?prepared.RawTransactions.map((x,i)=>({index:indices[i],hash:xrpl.hashes.hashSignedTx(x.RawTransaction)}))
     :kind==="single"?[{index:indices[0],hash:signed.hash}]:[]);
+  trace("tx.signed",{kind,hash:signed.hash,feeDrops:prepared.Fee,chunkCount:entries.length});
   receipt.pending={kind,hash:signed.hash,entries,feeDrops:prepared.Fee,
     sequence:prepared.Sequence,lastLedgerSequence:prepared.LastLedgerSequence};
   saveReceipt();displayReceipt(); // checkpoint BEFORE network submission
   txLog("SIGNED "+kind+" "+signed.hash+" fee="+prepared.Fee+" drops. Submitting...");
   try{
+    trace("tx.submit.start",{kind,hash:signed.hash});
     const response=await client.submitAndWait(signed.tx_blob);
     const r=response.result||{};
+    trace("tx.submit.response",{kind,hash:signed.hash,validated:!!r.validated,result:resultCode(r)||"unknown"});
     if(r.validated && resultCode(r) && resultCode(r)!=="tesSUCCESS")
       throw new Error("Ledger rejected "+kind+": "+resultCode(r));
   }catch(e){
@@ -418,6 +502,7 @@ async function readLedger(){
   if(m.network!==currentNetwork())throw new Error("Select "+m.network+" to read this receipt; cross-network reads are blocked");
   if(r.confirmed.length!==m.totalChunks)throw new Error("Receipt incomplete; need every transaction hash");
   setBusy(true);
+  trace("read.start",{chunks:m.totalChunks,network:m.network});
   try{
     const chunks=new Map();
     for(let n=0;n<r.confirmed.length;n++){
@@ -428,7 +513,7 @@ async function readLedger(){
       if(!memo?.Memo?.MemoData)throw new Error("Data memo missing at chunk "+entry.index);
       chunks.set(entry.index,decodeChunk(memo.Memo.MemoData,m.sha256,entry.index,m.totalChunks));
       $("readStatus").textContent="Reading ledger: "+(n+1)+"/"+m.totalChunks+" validated chunks";
-      if(n%25===0)await new Promise(resolve=>setTimeout(resolve,0));
+      if(n%25===0){trace("read.progress",{verified:n+1,total:m.totalChunks});await new Promise(resolve=>setTimeout(resolve,0))}
     }
     const binary=reassemble(chunks,m);
     const sha=await digestHex(binary);
@@ -443,14 +528,35 @@ async function readLedger(){
     else if(m.mime.startsWith("audio/")){view=document.createElement("audio");view.controls=true}
     else if(m.mime.startsWith("video/")){view=document.createElement("video");view.controls=true}
     if(view){view.src=previewUrl;$("preview").append(view)}
+    trace("read.success",{chunks:m.totalChunks,hash:sha});
     $("readStatus").textContent="VERIFIED FROM XRPL: "+m.filename+"\n"+m.totalChunks+
       " validated transactions\nSHA-256 "+sha+"\nNetwork: "+m.network;
-  }catch(e){$("readStatus").textContent="VERIFY FAILED / INCOMPLETE: "+safeText(e)}
+  }catch(e){trace("read.error",{message:safeText(e)},"error");$("readStatus").textContent="VERIFY FAILED / INCOMPLETE: "+safeText(e)}
   finally{setBusy(false)}
 }
 function on(id,cb){
-  $(id).addEventListener("click",async()=>{try{await cb()}catch(e){txLog("ERROR "+safeText(e));info("ERROR: "+safeText(e));if(id==="loadReceipt"||id==="readLedger")$("readStatus").textContent="ERROR: "+safeText(e)}finally{syncControls()}});
+  $(id).addEventListener("click",async()=>{
+    const started=performance.now();
+    trace("ui.action.start",{action:id,network:currentNetwork()});
+    try{
+      await cb();
+      trace("ui.action.complete",{action:id,elapsedMs:Math.round(performance.now()-started)});
+    }catch(e){
+      trace("ui.action.error",{action:id,message:safeText(e),elapsedMs:Math.round(performance.now()-started)},"error");
+      txLog("ERROR "+safeText(e));
+      info("ERROR: "+safeText(e));
+      if(id==="prepare" && !$("prepareStatus").classList.contains("error"))
+        prepareUI("Preparation failed: "+safeText(e),{error:true});
+      if(id==="loadReceipt"||id==="readLedger")$("readStatus").textContent="ERROR: "+safeText(e);
+    }finally{syncControls()}
+  });
 }
+$("sourceFile").addEventListener("change",()=>{
+  const f=$("sourceFile").files[0];
+  if(!f){prepareUI("Select a file, then press Prepare file.");return}
+  prepareUI("Selected "+f.name+" · "+f.size.toLocaleString()+" bytes. Press Prepare file.");
+  trace("file.selected",{sizeBytes:f.size,mediaType:f.type?.split("/")[0]||"unknown"});
+});
 on("connect",connectTestWallet);on("importWallet",importWallet);on("forgetWallet",()=>forgetWallet());
 on("backupWallet",()=>walletBackup());
 on("prepare",prepareFile);on("submit",submitGroups);on("resolve",resolvePendingAction);
@@ -461,6 +567,8 @@ on("clearCheckpoint",()=>{
   localStorage.removeItem(CHECKPOINT_KEY);receipt=null;rawBytes=null;$("sourceFile").value="";
   $("fileName").textContent="—";$("doneCount").textContent="0";$("progress").value=0;
   txLog("Local checkpoint discarded; ledger data remains public.");
+  prepareUI("Checkpoint discarded. Select a file and press Prepare.");
+  trace("checkpoint.cleared");
 });
 $("consent").addEventListener("change",syncControls);
 $("network").addEventListener("change",async()=>{
@@ -472,8 +580,11 @@ $("network").addEventListener("change",async()=>{
   $("netStatus").textContent="Not connected. Wallet erased from app state on network change.";
   $("networkLabel").textContent=currentNetwork().toUpperCase();
   $("readStatus").textContent="Network changed. Reimport matching receipt.";
+  prepareUI("Network changed. Choose the file again after connecting your wallet.");
+  trace("network.changed",{network:currentNetwork()});
   syncControls();
 });
 window.addEventListener("pagehide",()=>{wallet=null});
 syncControls();
+trace("app.initialized",{version:"0.2.2",network:currentNetwork(),online:navigator.onLine});
 txLog("Ready. Testnet / Devnet enabled. Mainnet and background signing disabled.");
