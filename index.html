@@ -77,8 +77,23 @@ details.advanced{border:1px solid #22482b;border-radius:9px;padding:9px 12px;mar
 details.advanced summary{color:#b1d1b6;font-size:13px}
 .usage-note{font-size:12px;color:#b1c2b3}
 #pauseAuto{background:#623a1d;color:#ffeed0}
+
+/* Dedicated visible diagnostics: in-page entry remains accessible if mobile browser hides floating UI. */
+.debug-visible{font-size:13px; padding:9px 13px;margin-top:8px;min-height:42px}
+.debug-ready-note{font-size:12px;color:#a0d7a8;display:inline-block;margin:8px}
+.local-wallet-picker{border-top:1px solid #254a2b;margin-top:16px;padding-top:14px}
+#ladybugToggle{position:fixed!important;top:calc(env(safe-area-inset-top) + 76px)!important;
+bottom:auto!important;right:12px!important;z-index:2147483646!important;
+visibility:visible!important;opacity:1!important;display:grid!important;pointer-events:auto!important}
+#debugPanel{position:fixed!important;top:calc(env(safe-area-inset-top) + 128px)!important;
+bottom:auto!important;z-index:2147483645!important;
+max-height:calc(100dvh - 150px)!important}
+#debugPanel[hidden],#debugCount[hidden]{display:none!important}
+@media(max-width:540px){#debugPanel{right:8px!important;width:calc(100vw - 16px)!important;max-height:calc(100dvh - 142px)!important}}
+#liveUploadStatus{margin-top:8px; border:1px solid #315e3a; border-radius:9px;
+padding:10px;background:#08110a;color:#a8e5b0;font-size:13px;white-space:pre-wrap}
 </style></head><body>
-<header><h1>XRPMAN <span style="color:#fff">MEMO MINTER</span></h1><div class="sub">REAL XRPL DATA STORAGE · BATCHES · ARCHIVE READER · NFT ANCHOR</div><span class="pill">v0.3.1 • FASTER VERIFY + FIXED LADYBUG • MAINNET DISABLED</span></header>
+<header><h1>XRPMAN <span style="color:#fff">MEMO MINTER</span></h1><div class="sub">REAL XRPL DATA STORAGE · BATCHES · ARCHIVE READER · NFT ANCHOR</div><span class="pill">v0.3.2 • VISIBLE DEBUG + UPLOAD RECOVERY • MAINNET DISABLED</span> <button id="debugDockToggle" class="secondary debug-visible" type="button" aria-controls="debugPanel" aria-expanded="false">🐞 Debug &amp; Logs</button><span class="debug-ready-note" id="debugHealth" role="status">Debug loading…</span></header>
 <div class="warn">Use a disposable Testnet wallet only. One button creates it locally, requests free Testnet XRP from the XRPL faucet, and verifies the ledger balance. Save your downloaded test-wallet backup to resume later; the seed is never uploaded to our site. Never reuse a Mainnet seed. Ledger data is public.</div>
 <section class="panel"><h2>01 / One-tap Test Wallet</h2>
 <p class="section-desc">No separate faucet website or manual seed entry. Press the button once; this app creates a disposable XRPL wallet in your browser, requests free test XRP, and verifies it from a validated ledger.</p>
@@ -87,11 +102,11 @@ details.advanced summary{color:#b1d1b6;font-size:13px}
 <div class="grid"><div class="stat"><strong id="walletAddr">Not loaded</strong><span>Signing address</span></div><div class="stat"><strong id="balance">—</strong><span>Validated test XRP balance</span></div><div class="stat"><strong id="networkLabel">TESTNET</strong><span>Network isolation</span></div></div>
 <div class="row"><button id="backupWallet" class="secondary" disabled>Download Wallet Backup JSON</button><button id="forgetWallet" class="danger">Disconnect Wallet</button></div>
 <p class="section-desc" id="backupStatus">A wallet backup download is requested when your test wallet is first created. Keep it to resume an upload after closing the browser.</p>
-<details><summary class="muted">Restore a previously created test wallet (optional)</summary>
-<label>Local wallet JSON file<input type="file" id="seedFile" accept=".json,application/json"></label>
-<button id="importWallet" class="secondary">Restore Wallet JSON</button>
-<p class="section-desc">The JSON contains your test seed; do not share it. Format: <code>{"seed":"s..."}</code>. Restoration stays inside your browser.</p>
-</details></section>
+<div class="local-wallet-picker"><label for="seedFile">Already have a test wallet? Load it locally.</label>
+<input type="file" id="seedFile" accept=".json,application/json" aria-label="Local self-custody wallet JSON">
+<button id="importWallet" class="secondary">Load My Wallet</button>
+<p class="section-desc">Your wallet file is read on this device. Nothing is uploaded; your private signing material is never saved to Vercel. Testnet/Devnet only for this build.</p>
+</div></section>
 <section class="panel" id="uploadSection"><h2>02 / Upload Your Media</h2>
 <p class="section-desc">Upload a picture, song, video, PDF or other file. Memo Minter automatically divides it into XRPL transaction data and prepares your archive. You don't have to do anything technical.</p>
 <label class="drop-media" for="sourceFile"><strong>Choose an image, song, video or file</strong><span>Tap to select media · currently up to 5 MiB (larger video support is a later upgrade)</span>
@@ -126,6 +141,7 @@ details.advanced summary{color:#b1d1b6;font-size:13px}
 <button id="autoMint" class="hero-action" disabled>Pay &amp; Mint</button>
 <button id="pauseAuto" type="button" hidden>Pause after Current Batch</button>
 <div id="autoStatus" class="section-desc" role="status" aria-live="polite">Connect a test wallet and select a file to begin.</div>
+<div id="liveUploadStatus" role="status" aria-live="polite">Status monitoring ready · no upload running</div>
 <div class="ledger-label">Verified data stored on XRPL</div>
 <progress id="progress" value="0" max="1" aria-label="Verified XRPL data progress"></progress>
 <progress id="uploadProgress" value="0" max="1" hidden aria-label="Automatic upload progress"></progress>
@@ -169,4 +185,4 @@ details.advanced summary{color:#b1d1b6;font-size:13px}
 </div>
 <p class="section-desc" style="font-size:11px;margin:0 0 6px">Local only. Records UI, file stages, network outcomes and errors. No seeds, raw media or signed blobs.</p>
 <div id="debugEntries" aria-live="off"></div></aside>
-<script type="module" src="/src/main.js"></script></body></html>
+<script src="/debug-boot.js" defer></script><script type="module" src="/src/main.js"></script></body></html>
