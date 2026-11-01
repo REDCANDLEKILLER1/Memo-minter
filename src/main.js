@@ -66,6 +66,7 @@ function syncControls() {
   $("resolve").disabled = !client?.isConnected() || !receipt?.pending || busy;
   $("export").disabled = !receipt;
   $("prepare").disabled = busy;
+  $("sourceFile").disabled = busy;
   $("connect").disabled = busy;
   $("connect").textContent = busy ? "Connecting & funding…" : walletFunded ? "Test Wallet Connected" : wallet ? "Retry Test Wallet" : "Connect Test Wallet";
   $("backupWallet").disabled = !wallet || busy;
@@ -364,6 +365,7 @@ async function prepareFile(){
       " batches. No transactions submitted yet. Continue to Section 03.",{ready:true});
     trace("prepare.success",{chunks:manifest.totalChunks,batches,hash,elapsedMs:Math.round(performance.now()-started)});
     txLog("File prepared locally: "+manifest.totalChunks+" chunks, "+batches+" estimated batches. Zero ledger writes.");
+    $("autoStatus").textContent="File ready! Check the network fee estimate and press Pay & Mint once.";
     updateQuote().catch(error=>trace("quote.error",{message:safeText(error)},"warn"));
   }catch(error){
     prepareUI("Preparation failed: "+safeText(error)+". Tap the ladybug to export the diagnostic log.",{error:true});
@@ -826,6 +828,7 @@ async function refreshGallery({scanWallet=true}={}){
       const view=document.createElement("button");view.type="button";view.textContent="View Media from XRPL";
       view.addEventListener("click",async()=>{
         try{
+          if(busy)throw new Error("Another operation is active. Try opening the gallery item after it completes.");
           readerReceipt=item.receipt;
           if(currentNetwork()!==m.network)throw new Error("Switch to "+m.network+" before reading this archive");
           await connectNetwork();await readLedger();
@@ -909,6 +912,7 @@ if(dropArea){
   dropArea.addEventListener("dragleave",()=>dropArea.classList.remove("dragging"));
   dropArea.addEventListener("drop",async event=>{
     event.preventDefault();dropArea.classList.remove("dragging");
+    if(busy){prepareUI("An upload is running. Pause it before choosing a new file.",{error:true});return}
     const file=event.dataTransfer?.files?.[0];
     if(!file)return;
     droppedMediaFile=file;
