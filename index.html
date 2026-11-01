@@ -92,10 +92,71 @@ max-height:calc(100dvh - 150px)!important}
 @media(max-width:540px){#debugPanel{right:8px!important;width:calc(100vw - 16px)!important;max-height:calc(100dvh - 142px)!important}}
 #liveUploadStatus{margin-top:8px; border:1px solid #315e3a; border-radius:9px;
 padding:10px;background:#08110a;color:#a8e5b0;font-size:13px;white-space:pre-wrap}
+
+/* Card-flow SPA: existing fields remain mounted, so hiding a card never resets wallet,
+   media bytes, websocket handles or the in-progress signing session. */
+.flow-card[hidden],#homeSection[hidden],#toolMenu[hidden],#receiptOverlay[hidden],
+#persistentUploadStrip[hidden]{display:none!important}
+#cardFlow{min-height:min(60dvh,680px)}
+.flow-card{margin:12px 0;min-height:min(46dvh,500px);box-shadow:0 6px 22px #0005}
+.flow-status{display:flex;align-items:center;justify-content:space-between;gap:12px;
+font-size:13px;color:#b6ddbb;margin:18px 0 4px;padding:0 2px}
+#flowStepLabel{font-weight:700;color:#00ff00}
+.flow-controls{position:sticky;bottom:0;z-index:90;display:grid;grid-template-columns:1fr 1fr 1.5fr;
+gap:8px;padding:12px 8px calc(12px + env(safe-area-inset-bottom,0px));background:#050905f2;
+border-top:1px solid #2a6135;margin-bottom:20px;backdrop-filter:blur(7px)}
+.flow-controls button{margin:0;min-width:0;min-height:46px;font-size:14px;padding:10px 8px}
+.flow-controls button[hidden]{display:none!important}
+.home-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:20px 0}
+.home-actions button{margin:0}
+.menu-toggle{position:relative;z-index:121;font-size:14px;min-height:42px}
+.tool-menu{position:absolute;top:auto;right:16px;z-index:120;width:min(310px,calc(100vw - 32px));
+background:#09130a;border:1px solid #00aa2c;border-radius:14px;box-shadow:0 14px 38px #000b;
+padding:12px;display:flex;flex-direction:column;gap:6px}
+.tool-menu button{margin:0;text-align:left;font-size:14px;min-height:43px}
+.tool-menu .debug-ready-note{padding:0 8px}
+.receipt-overlay{position:fixed;z-index:2147483641;inset:8dvh 10px auto;max-width:780px;margin:auto;
+padding:16px;background:#09140b;border:2px solid #00b93a;border-radius:14px;box-shadow:0 12px 48px #000d}
+.receipt-overlay .log{max-height:60dvh}
+.receipt-header{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.receipt-header button{margin:0}
+.upload-strip{position:sticky;top:0;z-index:95;display:grid;grid-template-columns:minmax(100px,1fr) minmax(75px,1.2fr) auto;
+align-items:center;gap:9px;background:#102515f5;border:1px solid #357f46;border-radius:10px;padding:8px 10px}
+.upload-strip strong{font-size:12px;color:#c9ffce;overflow-wrap:anywhere}
+.upload-strip progress{height:11px}
+.upload-strip button{font-size:12px;padding:8px;margin:0}
+@media(max-width:540px){body{padding:12px 12px 50px}
+.flow-card{padding:16px 13px;min-height:50dvh}
+.flow-controls{margin-left:-4px;margin-right:-4px}
+.flow-controls button{font-size:13px}
+.home-actions button{width:100%;max-width:none}
+.grid{grid-template-columns:minmax(0,1fr)}
+#ladybugToggle{top:calc(env(safe-area-inset-top) + 94px)!important}
+#debugPanel{top:calc(env(safe-area-inset-top) + 147px)!important;max-height:calc(100dvh - 155px)!important}
+}
 </style></head><body>
-<header><h1>XRPMAN <span style="color:#fff">MEMO MINTER</span></h1><div class="sub">REAL XRPL DATA STORAGE · BATCHES · ARCHIVE READER · NFT ANCHOR</div><span class="pill">v0.3.2 • VISIBLE DEBUG + UPLOAD RECOVERY • MAINNET DISABLED</span> <button id="debugDockToggle" class="secondary debug-visible" type="button" aria-controls="debugPanel" aria-expanded="false">🐞 Debug &amp; Logs</button><span class="debug-ready-note" id="debugHealth" role="status">Debug loading…</span></header>
-<div class="warn">Use a disposable Testnet wallet only. One button creates it locally, requests free Testnet XRP from the XRPL faucet, and verifies the ledger balance. Save your downloaded test-wallet backup to resume later; the seed is never uploaded to our site. Never reuse a Mainnet seed. Ledger data is public.</div>
-<section class="panel"><h2>01 / One-tap Test Wallet</h2>
+<header><h1>XRPMAN <span style="color:#fff">MEMO MINTER</span></h1><div class="sub">REAL XRPL DATA STORAGE · BATCHES · ARCHIVE READER · NFT ANCHOR</div><span class="pill">v0.3.3 • STEP-BY-STEP CARDS • MAINNET DISABLED</span> <button id="menuToggle" type="button" class="secondary menu-toggle" aria-controls="toolMenu" aria-expanded="false" aria-label="Open navigation menu">☰ Menu</button>
+<nav id="toolMenu" class="tool-menu" aria-label="App tools and navigation" hidden>
+<button type="button" id="menuClose" class="secondary">Close menu ×</button>
+<button type="button" id="menuHome" class="secondary">Home</button>
+<button type="button" id="menuGallery" class="secondary">My Gallery</button>
+<button id="debugDockToggle" class="secondary debug-visible" type="button" aria-controls="debugPanel" aria-expanded="false">🐞 Debug &amp; Logs</button>
+<button type="button" id="menuReceipts" class="secondary">Transaction History</button>
+<span class="debug-ready-note" id="debugHealth" role="status">Debug loading…</span>
+</nav></header>
+<div class="warn" id="testnetNotice">TESTNET · Disposable wallets only · Mainnet signing disabled. Archive data is public and Testnet can be reset. Keep your test-wallet backup.</div>
+<div id="persistentUploadStrip" class="upload-strip" hidden role="status" aria-live="polite">
+<strong id="persistentUploadLabel">Upload status</strong><progress id="persistentUploadProgress" max="1" value="0" aria-label="Verified archive upload progress"></progress>
+<button id="viewUploadStatus" type="button" class="secondary">View Upload</button></div>
+<div id="flowStatus" class="flow-status" role="status" aria-live="polite"><span id="flowStepLabel">Home</span><span id="flowStepNumber">1 / 5</span></div>
+<main id="cardFlow">
+<section class="panel flow-card" id="homeSection" data-flow-step="home">
+<h2>Welcome to XRPMan Memo Minter</h2>
+<p class="section-desc">Upload a picture, song or other media. Review the Testnet fee, mint your NFT, and find it in your gallery.</p>
+<div class="home-actions"><button id="homeStartMint" type="button" class="hero-action">Start Minting</button><button id="homeOpenGallery" type="button" class="secondary">My Gallery</button></div>
+<div class="prepare-status" id="homeUploadSummary" role="status">No upload in progress. Your Testnet wallet remains self-custodial.</div>
+</section>
+<section class="panel flow-card" id="walletSection" data-flow-step="wallet"><h2>Connect Test Wallet</h2>
 <p class="section-desc">No separate faucet website or manual seed entry. Press the button once; this app creates a disposable XRPL wallet in your browser, requests free test XRP, and verifies it from a validated ledger.</p>
 <div class="row"><label>Network <select id="network"><option value="testnet">XRPL Testnet</option><option value="devnet">XRPL Devnet (advanced)</option></select></label><button id="connect">Connect Test Wallet</button><span id="netStatus" class="muted">Not connected</span></div>
 <p id="walletState" class="section-desc" aria-live="polite">Ready to create and fund a test wallet.</p>
@@ -107,7 +168,7 @@ padding:10px;background:#08110a;color:#a8e5b0;font-size:13px;white-space:pre-wra
 <button id="importWallet" class="secondary">Load My Wallet</button>
 <p class="section-desc">Your wallet file is read on this device. Nothing is uploaded; your private signing material is never saved to Vercel. Testnet/Devnet only for this build.</p>
 </div></section>
-<section class="panel" id="uploadSection"><h2>02 / Upload Your Media</h2>
+<section class="panel flow-card" id="uploadSection" data-flow-step="upload"><h2>Upload Your Media</h2>
 <p class="section-desc">Upload a picture, song, video, PDF or other file. Memo Minter automatically divides it into XRPL transaction data and prepares your archive. You don't have to do anything technical.</p>
 <label class="drop-media" for="sourceFile"><strong>Choose an image, song, video or file</strong><span>Tap to select media · currently up to 5 MiB (larger video support is a later upgrade)</span>
 <input id="sourceFile" type="file" aria-label="Choose media to mint"></label>
@@ -132,7 +193,7 @@ padding:10px;background:#08110a;color:#a8e5b0;font-size:13px;white-space:pre-wra
 <p class="usage-note">A receipt contains transaction hashes and the archive manifest, not the uploaded file or your wallet seed.</p>
 </details>
 </section>
-<section class="panel" id="mintSection"><h2>03 / Pay &amp; Mint</h2>
+<section class="panel flow-card" id="mintSection" data-flow-step="mint"><h2>Pay &amp; Mint</h2>
 <p class="section-desc">Approve the total Testnet fee budget once. The app submits the required batches sequentially, verifies each on the ledger, and mints one NFT when the complete file checks out.</p>
 <div id="quoteBox" class="quote-box" role="status">
 <strong id="quotePrice">Upload a file to calculate the price.</strong>
@@ -156,7 +217,7 @@ padding:10px;background:#08110a;color:#a8e5b0;font-size:13px;white-space:pre-wra
 <p class="usage-note">The automated uploader has a strict 1 Test XRP per-session fee limit, 0.2 XRP maximum per outer transaction, and stops if any signed transaction outcome is uncertain. Mainnet and the 2 XRP platform charge remain disabled.</p>
 </details>
 </section>
-<section class="panel" id="gallerySection"><h2>04 / My Gallery</h2>
+<section class="panel flow-card" id="gallerySection" data-flow-step="gallery"><h2>My Gallery</h2>
 <p class="section-desc">See your completed NFTs and archives. Tap an item to reconstruct its media from validated XRPL transaction history. Your saved archive receipts remain on this device; you can export and restore them.</p>
 <div class="row"><button id="refreshGallery" class="secondary">Refresh Gallery</button></div>
 <div id="galleryStatus" class="section-desc" role="status">No gallery items loaded yet.</div>
@@ -172,8 +233,17 @@ padding:10px;background:#08110a;color:#a8e5b0;font-size:13px;white-space:pre-wra
 <button id="readLedger" class="secondary">Verify and View on XRPL</button></div>
 </details>
 </section>
-<details class="panel advanced"><summary>05 / Detailed XRPL transaction receipts</summary>
-<div class="log" id="txLog">No transactions submitted.</div></details>
+</main>
+<nav id="flowControls" class="flow-controls" aria-label="Step navigation">
+<button type="button" class="secondary" id="flowHome">Home</button>
+<button type="button" class="secondary" id="flowBack">Back</button>
+<button type="button" id="flowNext">Next: Connect Wallet</button>
+</nav>
+<aside id="receiptOverlay" role="dialog" aria-label="Transaction history" hidden class="receipt-overlay">
+<div class="receipt-header"><h2>Transaction History</h2><button type="button" id="receiptClose" class="secondary">Close ×</button></div>
+<p class="section-desc">Signed and validated hashes; no private wallet material.</p>
+<div class="log" id="txLog">No transactions submitted.</div>
+</aside>
 <footer>XRPMan Memo Minter • Non-custodial browser signer (test wallets only) • No servers receiving seeds • Not a production security audit</footer>
 <button type="button" id="ladybugToggle" aria-label="Open ladybug debug log" aria-expanded="false" aria-controls="debugPanel" title="Debug log">🐞<span id="debugCount" hidden></span></button>
 <aside id="debugPanel" role="dialog" aria-label="Ladybug diagnostic log" hidden>
