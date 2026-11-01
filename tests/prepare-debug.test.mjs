@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileWithProgress } from "../src/file-reader.js";
-import { scrubText, scrubDetails, createDiagnosticStore } from "../src/diagnostics.js";
+import { scrubText, scrubDetails, createDiagnosticStore, installGlobalDiagnostics } from "../src/diagnostics.js";
 
 test("progress reader preserves image bytes and monotonically reports real bytes",async()=>{
   const input=new Uint8Array(768043);
@@ -59,4 +59,26 @@ test("diagnostic log persists bounded sanitized events and never sends network d
   assert.equal(restored.list().length,350);
   restored.clear();assert.equal(restored.list().length,0);
   assert.equal(createDiagnosticStore(storage,clock).list().length,0);
+});
+
+test("console warnings/errors are traced without serializing secret-bearing objects",()=>{
+  const d=createDiagnosticStore(null,()=> "2026-11-01T12:00:00.000Z");
+  const output=[];
+  const fakeConsole={
+    warn:(...args)=>output.push(["warn",...args]),
+    error:(...args)=>output.push(["error",...args])
+  };
+  const fakeWindow={console:fakeConsole,addEventListener:()=>{}};
+  const fakeDocument={addEventListener:()=>{}};
+  installGlobalDiagnostics(d,fakeWindow,fakeDocument);
+  const secret="s"+"B".repeat(29);
+  fakeConsole.warn("wallet warning: "+secret,{seed:secret});
+  fakeConsole.error(new Error("failed seed="+secret));
+  const report=JSON.stringify(d.report());
+  assert.equal(output.length,2,"original console output is preserved");
+  assert.equal(d.list().length,2);
+  assert.ok(report.includes("console.warn"));
+  assert.ok(report.includes("console.error"));
+  assert.ok(!report.includes(secret),"no raw seed should enter exported diagnostics");
+  assert.ok(report.includes("[non-text value omitted]"));
 });
