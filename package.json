@@ -1,0 +1,18 @@
+{
+  "name": "xrpman-memo-minter",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "test": "node --test tests/*.test.mjs",
+    "prebuild": "npm test"
+  },
+  "dependencies": {
+    "xrpl": "4.4.0"
+  },
+  "devDependencies": {
+    "vite": "7.2.0"
+  }
+}
